@@ -49,6 +49,9 @@ export function Console({ onCommand }: { onCommand: (command: string) => Promise
             onCommand(command).then((result) => {
                 setOutput((prevOutput) => [...prevOutput, result]);
                 setInputQueue((prevQueue) => prevQueue.slice(1)); // Remove the processed command from the queue
+            }).catch((e) => {
+                setOutput(prevOutput => [...prevOutput, e.message])
+                setInputQueue(prevQueue => prevQueue.slice(1))
             });
         }
     }, [inputQueue, onCommand]);

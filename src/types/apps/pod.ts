@@ -1,7 +1,14 @@
+export interface Pod {
+    metadata: PodMetadata;
+    spec: PodSpec;
+}
 
 export interface PodMetadata {
-    labels: Record<string, string>; // A map of {key: value} pairs to categorize the pod
-    annotations: Record<string, string>; // A map of {key: value} pairs to store arbitrary metadata about the pod
+    namespace: string;
+    name: string;
+    uid: string;
+    labels?: Record<string, string>; // A map of {key: value} pairs to categorize the pod
+    annotations?: Record<string, string>; // A map of {key: value} pairs to store arbitrary metadata about the pod
     creationTimestamp: string; // ISO 8601 format timestamp indicating when the pod was created
 }
 

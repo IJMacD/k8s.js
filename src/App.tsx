@@ -1,41 +1,38 @@
+import { useReducer } from 'react';
 import './App.css'
 import { Console } from './Console'
+import { reducer, type Action, type AppState } from './store';
+import { command } from './command';
+
+const initialState: AppState = {
+  Deployments: [],
+  ReplicaSets: [],
+  Pods: [],
+}
 
 function App() {
+  const [store, dispatch] = useReducer<AppState, [action: Action]>(reducer, initialState)
 
   function handleCommand(inputLine: string): Promise<string> {
-    // For now, just echo the command back with a simple response
-    return new Promise((resolve) => {
-      const [command, ...args] = inputLine.trim().toLowerCase().split(' ');
-
-      if (command === '') {
-        resolve('');
-        return;
-      } else if (command === 'help') {
-        resolve('Available commands: help, echo [message], date');
-        return;
-      } else if (command === 'echo') {
-        const message = args.join(' ');
-        resolve(message);
-        return;
-      } else if (command === 'date') {
-        if (args[0] === '--iso') {
-          resolve(new Date().toISOString());
-          return;
-        }
-        resolve(new Date().toString());
-        return;
-      } else {
-        resolve(`Unknown command: ${command}`);
-        return;
-      }
-    });
+    return command(inputLine, dispatch);
   }
 
   return (
     <>
       <div style={{ flex: 1}}>
         <h1>k8s.js</h1>
+        <h2>Deployments</h2>
+        <ul>
+          {store.Deployments.map(d => <li key={`${d.metadata.namespace}/${d.metadata.name}`}>{d.metadata.namespace}/{d.metadata.name}</li>)}
+        </ul>
+        <h2>ReplicaSets</h2>
+        <ul>
+          {store.ReplicaSets.map(r => <li key={`${r.metadata.namespace}/${r.metadata.name}`}>{r.metadata.namespace}/{r.metadata.name}</li>)}
+        </ul>
+        <h2>Pods</h2>
+        <ul>
+          {store.Pods.map(p => <li key={`${p.metadata.namespace}/${p.metadata.name}`}>{p.metadata.namespace}/{p.metadata.name}</li>)}
+        </ul>
       </div>
       <Console onCommand={handleCommand} />
     </>
