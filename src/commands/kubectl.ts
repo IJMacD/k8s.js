@@ -179,6 +179,9 @@ export function kubectl(
         const svcNameFlag = args.find(a => a.startsWith("--name="));
         const svcName = svcNameFlag?.slice("--name=".length) ?? name;
 
+        const alreadyExists = state.Services.some(s => s.metadata.name === svcName && s.metadata.namespace === namespace);
+        if (alreadyExists) throw Error(`Error from server (AlreadyExists): services "${svcName}" already exists`);
+
         // Generate a stable fake clusterIP
         const clusterIP = `10.96.${Math.floor(Math.random() * 254) + 1}.${Math.floor(Math.random() * 254) + 1}`;
 
