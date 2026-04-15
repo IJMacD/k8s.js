@@ -48,7 +48,6 @@ export function Console({ onCommand }: { onCommand: (command: string) => AsyncGe
         }
         setHistoryIndex(-1);
         setInput('');
-        if (inputRef.current) inputRef.current.style.height = 'auto';
     };
 
     const outputRef = useRef<HTMLDivElement>(null);
@@ -124,10 +123,13 @@ export function Console({ onCommand }: { onCommand: (command: string) => AsyncGe
     const moveCursorToEndRef = useRef(false);
 
     useEffect(() => {
-        if (moveCursorToEndRef.current && inputRef.current) {
-            const len = inputRef.current.value.length;
-            inputRef.current.setSelectionRange(len, len);
-            moveCursorToEndRef.current = false;
+        if (inputRef.current) {
+            autoResize(inputRef.current);
+            if (moveCursorToEndRef.current) {
+                const len = inputRef.current.value.length;
+                inputRef.current.setSelectionRange(len, len);
+                moveCursorToEndRef.current = false;
+            }
         }
     }, [input]);
 
