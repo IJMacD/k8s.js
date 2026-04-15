@@ -52,6 +52,7 @@ const CreateStatefulSetType = "CREATE_STATEFULSET";
 const DeleteStatefulSetType = "DELETE_STATEFULSET";
 const UpdateStatefulSetStatusType = "UPDATE_STATEFULSET_STATUS";
 const ScaleStatefulSetType = "SCALE_STATEFULSET";
+const PatchResourceType = "PATCH_RESOURCE";
 
 export type ActionType =
     | typeof CreateDeploymentType
@@ -84,7 +85,8 @@ export type ActionType =
     | typeof CreateStatefulSetType
     | typeof DeleteStatefulSetType
     | typeof UpdateStatefulSetStatusType
-    | typeof ScaleStatefulSetType;
+    | typeof ScaleStatefulSetType
+    | typeof PatchResourceType;
 
 export interface CreateDeploymentAction {
     type: typeof CreateDeploymentType;
@@ -297,7 +299,8 @@ export type Action =
     | CreateStatefulSetAction
     | UpdateStatefulSetStatusAction
     | { type: typeof ScaleStatefulSetType; payload: { name: string; namespace: string; replicas: number } }
-    | { type: typeof DeleteStatefulSetType; payload: { name: string; namespace: string } };
+    | { type: typeof DeleteStatefulSetType; payload: { name: string; namespace: string } }
+    | { type: typeof PatchResourceType; payload: { kind: string; name: string; namespace: string; patch: Record<string, unknown> } };
 
 export function deleteDeployment(name: string, namespace = "default") {
     return { type: DeleteDeploymentType as typeof DeleteDeploymentType, payload: { name, namespace } };
@@ -346,6 +349,15 @@ export function createStatefulSet(
 
 export function deleteStatefulSet(name: string, namespace = "default") {
     return { type: DeleteStatefulSetType as typeof DeleteStatefulSetType, payload: { name, namespace } };
+}
+
+export function patchResource(
+    kind: string,
+    name: string,
+    patch: Record<string, unknown>,
+    namespace = "default",
+) {
+    return { type: PatchResourceType as typeof PatchResourceType, payload: { kind, name, namespace, patch } };
 }
 
 export function scaleStatefulSet(name: string, replicas: number, namespace = "default") {
@@ -1122,5 +1134,40 @@ export const reducer = (state: AppState, action: Action): AppState => {
             ),
         };
     }
+    if (action.type === PatchResourceType) {
+        const { kind, name, namespace, patch } = action.payload;
+        const apply = <T extends object>(item: T): T => mergePatch(item, patch);
+        const match = <T extends { metadata: { name: string; namespace?: string } }>(r: T) =>
+            r.metadata.name === name && (r.metadata.namespace === undefined || r.metadata.namespace === namespace);
+        switch (kind) {
+            case "deployment": return { ...state, Deployments: state.Deployments.map(r => match(r) ? apply(r) : r) };
+            case "replicaset": return { ...state, ReplicaSets: state.ReplicaSets.map(r => match(r) ? apply(r) : r) };
+            case "daemonset":  return { ...state, DaemonSets:  state.DaemonSets.map(r => match(r) ? apply(r) : r) };
+            case "statefulset":return { ...state, StatefulSets: state.StatefulSets.map(r => match(r) ? apply(r) : r) };
+            case "pod":        return { ...state, Pods:         state.Pods.map(r => match(r) ? apply(r) : r) };
+            case "service":    return { ...state, Services:     state.Services.map(r => match(r) ? apply(r) : r) };
+            case "node":       return { ...state, Nodes:        state.Nodes.map(r => match(r) ? apply(r) : r) };
+            case "job":        return { ...state, Jobs:         state.Jobs.map(r => match(r) ? apply(r) : r) };
+            case "cronjob":    return { ...state, CronJobs:     state.CronJobs.map(r => match(r) ? apply(r) : r) };
+        }
+    }
     return state;
 };
+
+/** RFC 7396 JSON Merge Patch — deep-merges `patch` into `target`; null values remove the key. */
+function mergePatch<T extends object>(target: T, patch: Record<string, unknown>): T {
+    const result: Record<string, unknown> = { ...target as Record<string, unknown> };
+    for (const [key, value] of Object.entries(patch)) {
+        if (value === null) {
+            delete result[key];
+        } else if (
+            typeof value === "object" && !Array.isArray(value) &&
+            typeof result[key] === "object" && result[key] !== null && !Array.isArray(result[key])
+        ) {
+            result[key] = mergePatch(result[key] as object, value as Record<string, unknown>);
+        } else {
+            result[key] = value;
+        }
+    }
+    return result as T;
+}
