@@ -13,6 +13,7 @@ import { kubectlNode } from "./kubectl-node";
 import { kubectlPatch } from "./kubectl-patch";
 import { kubectlRollout } from "./kubectl-rollout";
 import { kubectlScale } from "./kubectl-scale";
+import { kubectlLabel } from "./kubectl-label";
 import { kubectlSet } from "./kubectl-set";
 
 /**
@@ -60,6 +61,10 @@ export async function* kubectl(
     }
     if (args[0] === "expose") {
         yield* kubectlExpose(args, namespace, state, dispatch);
+        return;
+    }
+    if (args[0] === "label") {
+        yield* kubectlLabel(args, namespace, state, dispatch);
         return;
     }
     if (args[0] === "cordon" || args[0] === "uncordon" || args[0] === "drain") {

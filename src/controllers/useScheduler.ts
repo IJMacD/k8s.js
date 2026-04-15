@@ -35,8 +35,18 @@ export function useScheduler(
         for (const pod of unscheduled) {
             scheduledRef.current.add(pod.metadata.uid);
 
+            // Filter by nodeSelector: only consider nodes that match all required labels
+            const nodeSelector = pod.spec.nodeSelector;
+            const eligibleNodes = nodeSelector && Object.keys(nodeSelector).length > 0
+                ? readyNodes.filter(n =>
+                    Object.entries(nodeSelector).every(([k, v]) => n.metadata.labels[k] === v)
+                )
+                : readyNodes;
+
+            if (eligibleNodes.length === 0) continue; // No matching node; pod stays Pending
+
             // Least-loaded: pick node with fewest pods currently assigned
-            const chosen = readyNodes.reduce((best, node) => {
+            const chosen = eligibleNodes.reduce((best, node) => {
                 const count = Pods.filter(p => p.spec.nodeName === node.metadata.name).length;
                 const bestCount = Pods.filter(p => p.spec.nodeName === best.metadata.name).length;
                 return count < bestCount ? node : best;
