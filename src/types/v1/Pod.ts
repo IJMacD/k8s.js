@@ -54,7 +54,9 @@ export interface Container {
 }
 
 export interface ContainerPort {
+    name?: string;          // Optional named port (e.g. "http", "metrics")
     containerPort: number; // Port number to be exposed by the container
+    protocol: "TCP" | "UDP"; // Protocol for the port
 }
 
 export interface ResourceRequirements {

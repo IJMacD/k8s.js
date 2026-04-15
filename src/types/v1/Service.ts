@@ -25,7 +25,7 @@ export interface ServiceSpec {
 export interface ServicePort {
     name?: string;
     port: number;
-    targetPort: number;
+    targetPort: number | string;  // number = port number, string = named container port
     protocol: "TCP" | "UDP";
     nodePort?: number;
 }

@@ -205,10 +205,17 @@ function resolveViaService(svcName: string, svcNs: string, portHint: number, sta
     if (!pod) return { ok: false, reason: "not_found", port: svcPort.port };
 
     // Validate that targetPort is reachable on the pod (same check as the direct pod-IP path).
+    // Named targetPort (string) is resolved to a concrete port number via the pod's container ports.
     const podImage = pod.spec.containers[0]?.image ?? "";
     const podContainerPorts = pod.spec.containers.flatMap(c => c.ports?.map(p => p.containerPort) ?? []);
     const podAllowedPorts = podContainerPorts.length > 0 ? podContainerPorts : defaultPortsForImage(podImage);
-    if (podAllowedPorts.length > 0 && !podAllowedPorts.includes(svcPort.targetPort)) {
+
+    const resolvedTargetPort: number =
+        typeof svcPort.targetPort === "number"
+            ? svcPort.targetPort
+            : pod.spec.containers.flatMap(c => c.ports ?? []).find(p => p.name === svcPort.targetPort)?.containerPort ?? 0;
+
+    if (podAllowedPorts.length > 0 && !podAllowedPorts.includes(resolvedTargetPort)) {
         return { ok: false, reason: "port_refused", port: portHint };
     }
 
@@ -219,7 +226,7 @@ function resolveViaService(svcName: string, svcNs: string, portHint: number, sta
                 podNamespace: pod.metadata.namespace,
                 image: pod.spec.containers[0]?.image ?? "",
                 phase: pod.status.phase,
-                port: svcPort.targetPort,
+                port: resolvedTargetPort,
                 dialIP: svc.spec.clusterIP,
                 resolvedIP: epAddress.ip,
                 viaService: svcName,

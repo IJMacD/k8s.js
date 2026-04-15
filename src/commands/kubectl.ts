@@ -215,7 +215,11 @@ export async function* kubectl(
         if (isNaN(port)) throw Error("kubectl expose: --port must be a number");
 
         const targetPortFlag = args.find(a => a.startsWith("--target-port="));
-        const targetPort = targetPortFlag ? parseInt(targetPortFlag.slice("--target-port=".length), 10) : port;
+        const rawTargetPort = targetPortFlag?.slice("--target-port=".length);
+        // Named port (e.g. --target-port=http) or numeric (e.g. --target-port=8080)
+        const targetPort: number | string = rawTargetPort
+            ? (/^\d+$/.test(rawTargetPort) ? parseInt(rawTargetPort, 10) : rawTargetPort)
+            : port;
 
         const typeFlag = args.find(a => a.startsWith("--type="));
         const serviceType = (typeFlag?.slice("--type=".length) ?? "ClusterIP") as import("../types/v1/Service").ServiceType;
@@ -644,7 +648,7 @@ export async function* kubectl(
                 ...containers.flatMap(c => [
                     `   ${c.name}:`,
                     `    Image:  ${c.image}`,
-                    `    Port:   ${c.ports?.length ? c.ports.map(p => `${p.containerPort}/TCP`).join(", ") : "<none>"}`,
+                    `    Port:   ${c.ports?.length ? c.ports.map(p => p.name ? `${p.containerPort}/${p.protocol} (${p.name})` : `${p.containerPort}/${p.protocol}`).join(", ") : "<none>"}`,
                 ]),
                 `Update Strategy: ${ds.spec.updateStrategy.type}`,
                 `Events:  <none>`,
@@ -682,7 +686,7 @@ export async function* kubectl(
                 ...containers.flatMap(c => [
                     `   ${c.name}:`,
                     `    Image:  ${c.image}`,
-                    `    Port:   ${c.ports?.length ? c.ports.map(p => `${p.containerPort}/TCP`).join(", ") : "<none>"}`,
+                    `    Port:   ${c.ports?.length ? c.ports.map(p => p.name ? `${p.containerPort}/${p.protocol} (${p.name})` : `${p.containerPort}/${p.protocol}`).join(", ") : "<none>"}`,
                 ]),
                 `Volume Claim Templates:  <none>`,
                 `Service Name:  ${sts.spec.serviceName}`,
@@ -729,7 +733,7 @@ export async function* kubectl(
                 ...containers.flatMap(c => [
                     `   ${c.name}:`,
                     `    Image:       ${c.image}`,
-                    `    Port:        ${c.ports?.length ? c.ports.map(p => `${p.containerPort}/TCP`).join(", ") : "<none>"}`,
+                    `    Port:        ${c.ports?.length ? c.ports.map(p => p.name ? `${p.containerPort}/${p.protocol} (${p.name})` : `${p.containerPort}/${p.protocol}`).join(", ") : "<none>"}`,
                     `    Environment: <none>`,
                 ]),
                 `Conditions:`,
@@ -774,7 +778,7 @@ export async function* kubectl(
                 ...containers.flatMap(c => [
                     `   ${c.name}:`,
                     `    Image:  ${c.image}`,
-                    `    Port:   ${c.ports?.length ? c.ports.map(p => `${p.containerPort}/TCP`).join(", ") : "<none>"}`,
+                    `    Port:   ${c.ports?.length ? c.ports.map(p => p.name ? `${p.containerPort}/${p.protocol} (${p.name})` : `${p.containerPort}/${p.protocol}`).join(", ") : "<none>"}`,
                 ]),
                 `Conditions:`,
                 `  Type             Status`,
@@ -891,11 +895,13 @@ export async function* kubectl(
 
             const containerReady = pod.status.conditions?.find(c => c.type === "ContainersReady")?.status === "True";
 
-            const containerStateLines = (c: { name: string; image: string; ports?: Array<{ containerPort: number }> }): string[] => {
+            const containerStateLines = (c: { name: string; image: string; ports?: import("../types/v1/Pod").ContainerPort[] }): string[] => {
+                const fmtPort = (p: import("../types/v1/Pod").ContainerPort) =>
+                    p.name ? `${p.containerPort}/${p.protocol} (${p.name})` : `${p.containerPort}/${p.protocol}`;
                 const base = [
                     `   ${c.name}:`,
                     `    Image:          ${c.image}`,
-                    `    Port:           ${c.ports?.length ? c.ports.map(p => `${p.containerPort}/TCP`).join(", ") : "<none>"}`,
+                    `    Port:           ${c.ports?.length ? c.ports.map(fmtPort).join(", ") : "<none>"}`,
                     `    Host Port:      0/TCP`,
                 ];
                 switch (pod.status.phase) {
@@ -1004,8 +1010,8 @@ export async function* kubectl(
                 `IP Families:              IPv4`,
                 `IP:                       ${svc.spec.clusterIP}`,
                 `IPs:                      ${svc.spec.clusterIP}`,
-                ...svc.spec.ports.map(p => `Port:                     <unset>  ${p.port}/TCP`),
-                ...svc.spec.ports.map(p => `TargetPort:               ${p.targetPort}/TCP`),
+                ...svc.spec.ports.map(p => `Port:                     ${p.name ? `${p.name}  ` : "<unset>  "}${p.port}/TCP`),
+                ...svc.spec.ports.map(p => `TargetPort:               ${typeof p.targetPort === "string" ? p.targetPort : `${p.targetPort}/TCP`}`),
                 `Endpoints:                ${endpointStrs.length > 0 ? endpointStrs.join(",") : "<none>"}`,
                 `Session Affinity:         None`,
                 `Events:                   <none>`,

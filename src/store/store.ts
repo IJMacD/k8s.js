@@ -98,7 +98,7 @@ export interface CreatePodAction {
         namespace: string;
         image: string;
         containerName?: string;
-        ports?: Array<{ containerPort: number }>;
+        ports?: Array<{ name?: string; containerPort: number; protocol?: "TCP" | "UDP" }>;
         labels?: Record<string, string>;
         restartPolicy?: "Always" | "OnFailure" | "Never";
         nodeName?: string;
@@ -187,7 +187,7 @@ export interface CreateServiceAction {
         name: string;
         namespace: string;
         selector: Record<string, string>;
-        ports: Array<{ port: number; targetPort: number; protocol?: "TCP" | "UDP" }>;
+        ports: Array<{ name?: string; port: number; targetPort: number | string; protocol?: "TCP" | "UDP" }>;
         clusterIP: string;
         serviceType: import("../types/v1/Service").ServiceType;
     };
@@ -732,7 +732,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
                         phase: "Pending",
                     },
                     spec: {
-                        containers: [{ name: containerName ?? name, image, ...(ports && { ports }) }],
+                        containers: [{ name: containerName ?? name, image, ...(ports && { ports: ports.map(p => ({ name: p.name, containerPort: p.containerPort, protocol: p.protocol ?? "TCP" as const })) }) }],
                         ...(restartPolicy && { restartPolicy }),
                         ...(nodeName && { nodeName }),
                     },
@@ -840,7 +840,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
                 type: serviceType,
                 selector,
                 clusterIP,
-                ports: ports.map(p => ({ port: p.port, targetPort: p.targetPort, protocol: p.protocol ?? "TCP" })),
+                ports: ports.map(p => ({ name: p.name, port: p.port, targetPort: p.targetPort, protocol: p.protocol ?? "TCP" })),
             },
             status: {},
         };
