@@ -1,6 +1,5 @@
 import type { ActionDispatch } from "react";
 import {
-    setDeploymentImage,
     type Action,
     type AppState,
 } from "../store/store";
@@ -14,6 +13,7 @@ import { kubectlNode } from "./kubectl-node";
 import { kubectlPatch } from "./kubectl-patch";
 import { kubectlRollout } from "./kubectl-rollout";
 import { kubectlScale } from "./kubectl-scale";
+import { kubectlSet } from "./kubectl-set";
 
 /**
  * Strips -n / --namespace flags from kubectl args and returns the clean
@@ -50,25 +50,9 @@ export async function* kubectl(
         yield* kubectlCreate(args, namespace, state, dispatch);
         return;
     }
-    if (args[0] === "set" && args[1] === "image") {
-        // kubectl set image deployment/<name> <container>=<image>
-        const resourceArg = args[2];
-        if (!resourceArg?.startsWith("deployment/"))
-            throw Error("kubectl set image: specify deployment/<name>");
-        const deploymentName = resourceArg.slice("deployment/".length);
-        if (!deploymentName) throw Error("kubectl set image: missing deployment name");
-
-        const assignArg = args[3];
-        if (!assignArg?.includes("="))
-            throw Error("kubectl set image: expected <container>=<image>");
-        const eqIdx = assignArg.indexOf("=");
-        const container = assignArg.slice(0, eqIdx);
-        const image = assignArg.slice(eqIdx + 1);
-        if (!container || !image)
-            throw Error("kubectl set image: expected <container>=<image>");
-
-        dispatch(setDeploymentImage(deploymentName, container, image, namespace));
-        yield `deployment.apps/${deploymentName} image updated`; return;
+    if (args[0] === "set") {
+        yield* kubectlSet(args, namespace, state, dispatch);
+        return;
     }
     if (args[0] === "scale") {
         yield* kubectlScale(args, namespace, state, dispatch);

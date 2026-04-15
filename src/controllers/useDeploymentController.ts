@@ -7,9 +7,16 @@ import type { DeploymentStrategy } from "../types/apps/v1/Deployment";
 /**
  * Computes a stable 7-char hex hash of a pod template's containers,
  * used to generate ReplicaSet names (mirrors kubectl's pod-template-hash label).
+ * Includes image, env vars, and resource requirements so that changes to any of
+ * these fields produce a new ReplicaSet (matching real Kubernetes rollout behaviour).
  */
-function podTemplateHash(containers: Array<{ name: string; image: string }>): string {
-    const str = containers.map(c => `${c.name}=${c.image}`).join(",");
+function podTemplateHash(containers: import("../types/v1/Pod").Container[]): string {
+    const str = containers.map(c => {
+        const ports = (c.ports ?? []).map(p => `${p.containerPort}/${p.protocol ?? "TCP"}`).join(";");
+        const env = (c.env ?? []).map(e => `${e.name}=${e.value ?? ""}`).join(";");
+        const res = JSON.stringify(c.resources ?? {});
+        return `${c.name}=${c.image}|${ports}|${env}|${res}`;
+    }).join(",");
     let hash = 5381;
     for (let i = 0; i < str.length; i++) {
         hash = ((hash << 5) + hash) ^ str.charCodeAt(i);

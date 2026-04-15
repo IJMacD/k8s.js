@@ -505,7 +505,7 @@ export interface CreateReplicaSetAction {
         ownerRef: { name: string; uid: string };
         replicas: number;
         selector: { matchLabels: Record<string, string> };
-        containers: Array<{ name: string; image: string }>;
+        containers: import("../types/v1/Pod").Container[];
     };
 }
 
