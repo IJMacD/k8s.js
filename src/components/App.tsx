@@ -7,7 +7,6 @@ import { ResourceTabs } from './ResourceTabs';
 import { useDeploymentController } from '../controllers/useDeploymentController';
 import { useReplicaSetController } from '../controllers/useReplicaSetController';
 import { useKubelet } from '../controllers/useKubelet';
-import { useStatusController } from '../controllers/useStatusController';
 import { useEndpointsController } from '../controllers/useEndpointsController';
 import { useScheduler } from '../controllers/useScheduler';
 import { useJobController } from '../controllers/useJobController';
@@ -58,7 +57,6 @@ function App() {
   useDeploymentController(store, dispatch);
   useReplicaSetController(store, dispatch);
   useKubelet(store, dispatch);
-  useStatusController(store, dispatch);
   useEndpointsController(store, dispatch);
   useScheduler(store, dispatch);
   useJobController(store, dispatch);

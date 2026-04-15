@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { ActionDispatch } from "react";
 import type { AppState, Action } from "../store/store";
-import { createReplicaSet, deleteReplicaSet, scaleReplicaSet } from "../store/store";
+import { createReplicaSet, deleteReplicaSet, scaleReplicaSet, updateDeploymentStatus } from "../store/store";
 import type { DeploymentStrategy } from "../types/apps/v1/Deployment";
 
 /**
@@ -172,5 +172,30 @@ export function useDeploymentController(
         }
 
         return () => timers.forEach(clearTimeout);
+    }, [Deployments, ReplicaSets, dispatch]);
+
+    // Status rollup — separate effect with change-detection to avoid cancelling timers above.
+    useEffect(() => {
+        for (const d of Deployments) {
+            const { name, namespace } = d.metadata;
+
+            const ownedRSes = ReplicaSets.filter(
+                rs =>
+                    rs.metadata.namespace === namespace &&
+                    rs.metadata.ownerReferences?.some(r => r.kind === "Deployment" && r.name === name),
+            );
+
+            const readyReplicas = ownedRSes.reduce((sum, rs) => sum + rs.status.readyReplicas, 0);
+            const availableReplicas = ownedRSes.reduce((sum, rs) => sum + rs.status.availableReplicas, 0);
+            const updatedReplicas = ownedRSes.reduce((sum, rs) => sum + rs.status.replicas, 0);
+
+            if (
+                d.status.readyReplicas !== readyReplicas ||
+                d.status.availableReplicas !== availableReplicas ||
+                d.status.updatedReplicas !== updatedReplicas
+            ) {
+                dispatch(updateDeploymentStatus(name, namespace, { readyReplicas, availableReplicas, updatedReplicas }));
+            }
+        }
     }, [Deployments, ReplicaSets, dispatch]);
 }

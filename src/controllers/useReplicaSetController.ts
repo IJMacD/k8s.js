@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { ActionDispatch } from "react";
 import type { AppState, Action } from "../store/store";
-import { createPod, deletePod } from "../store/store";
+import { createPod, deletePod, updateReplicaSetStatus } from "../store/store";
 
 /** Simulated reconciliation delay in milliseconds */
 const RECONCILE_DELAY_MS = 2_000;
@@ -84,5 +84,28 @@ export function useReplicaSetController(
         }
 
         return () => timers.forEach(clearTimeout);
+    }, [ReplicaSets, Pods, dispatch]);
+
+    // Status rollup — separate effect with change-detection to avoid cancelling timers above.
+    useEffect(() => {
+        for (const rs of ReplicaSets) {
+            const { name, namespace } = rs.metadata;
+            const ownedPods = Pods.filter(
+                p =>
+                    p.metadata.namespace === namespace &&
+                    p.metadata.ownerReferences?.some(r => r.kind === "ReplicaSet" && r.name === name),
+            );
+            const replicas = ownedPods.length;
+            const readyReplicas = ownedPods.filter(
+                p => p.status.conditions?.find(c => c.type === "Ready")?.status === "True",
+            ).length;
+            if (
+                rs.status.replicas !== replicas ||
+                rs.status.readyReplicas !== readyReplicas ||
+                rs.status.availableReplicas !== readyReplicas
+            ) {
+                dispatch(updateReplicaSetStatus(name, namespace, { replicas, readyReplicas, availableReplicas: readyReplicas }));
+            }
+        }
     }, [ReplicaSets, Pods, dispatch]);
 }
