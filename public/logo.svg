@@ -1,15 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="k8s.js logo">
+  <!-- Blue background circle (k8s blue) -->
   <circle cx="100" cy="100" r="92" fill="#326CE5"/>
+
+  <!-- Outer white ring -->
   <circle cx="100" cy="100" r="78" fill="none" stroke="white" stroke-width="7"/>
+
+  <!-- 7 helm spokes: each is a vertical line from r=28 to r=65 rotated around center.
+       Rotations: 360/7 ≈ 51.43° apart. -->
   <g stroke="white" stroke-width="5" stroke-linecap="round">
-    <line x1="100" y1="29" x2="100" y2="72" transform="rotate(0,   100, 100)"/>
-    <line x1="100" y1="29" x2="100" y2="72" transform="rotate(51.43,  100, 100)"/>
-    <line x1="100" y1="29" x2="100" y2="72" transform="rotate(102.86, 100, 100)"/>
-    <line x1="100" y1="29" x2="100" y2="72" transform="rotate(154.29, 100, 100)"/>
-    <line x1="100" y1="29" x2="100" y2="72" transform="rotate(205.71, 100, 100)"/>
-    <line x1="100" y1="29" x2="100" y2="72" transform="rotate(257.14, 100, 100)"/>
-    <line x1="100" y1="29" x2="100" y2="72" transform="rotate(308.57, 100, 100)"/>
+    <line x1="100" y1="29" x2="100" y2="65" transform="rotate(0,   100, 100)"/>
+    <line x1="100" y1="29" x2="100" y2="65" transform="rotate(51.43,  100, 100)"/>
+    <line x1="100" y1="29" x2="100" y2="65" transform="rotate(102.86, 100, 100)"/>
+    <line x1="100" y1="29" x2="100" y2="65" transform="rotate(154.29, 100, 100)"/>
+    <line x1="100" y1="29" x2="100" y2="65" transform="rotate(205.71, 100, 100)"/>
+    <line x1="100" y1="29" x2="100" y2="65" transform="rotate(257.14, 100, 100)"/>
+    <line x1="100" y1="29" x2="100" y2="65" transform="rotate(308.57, 100, 100)"/>
   </g>
+
+  <!-- Spoke-end dots sitting on the outer ring -->
   <g fill="white">
     <circle cx="100" cy="22" r="6" transform="rotate(0,   100, 100)"/>
     <circle cx="100" cy="22" r="6" transform="rotate(51.43,  100, 100)"/>
@@ -19,13 +27,15 @@
     <circle cx="100" cy="22" r="6" transform="rotate(257.14, 100, 100)"/>
     <circle cx="100" cy="22" r="6" transform="rotate(308.57, 100, 100)"/>
   </g>
-  <circle cx="100" cy="100" r="55" fill="#F7DF1E"/>
+
+  <!-- Center hub: JS yellow badge -->
+  <circle cx="100" cy="100" r="32" fill="#F7DF1E"/>
   <text
-    x="100" y="116"
+    x="100" y="110"
     text-anchor="middle"
     font-family="Arial Black, 'Helvetica Neue', sans-serif"
     font-weight="900"
-    font-size="40"
+    font-size="24"
     fill="#323330"
   >JS</text>
 </svg>
