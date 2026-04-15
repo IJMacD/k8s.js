@@ -23,14 +23,15 @@ export function useKubelet(
     // Accumulate all timers so they can be cleared on unmount only
     const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-    const { Pods } = state;
+    const { Pods, Nodes } = state;
 
     useEffect(() => {
         for (const pod of Pods) {
             const uid = pod.metadata.uid;
             if (scheduledRef.current.has(uid)) continue;
-            // Only drive Pending pods
+            // Only drive Pending pods that have been bound to a node
             if (pod.status.phase !== "Pending") continue;
+            if (!pod.spec.nodeName) continue;
 
             scheduledRef.current.add(uid);
 
@@ -70,9 +71,12 @@ export function useKubelet(
             }, 2_000));
 
             // t+3.5s: Running + Ready
+            const node = Nodes.find(n => n.metadata.name === pod.spec.nodeName);
             timersRef.current.push(setTimeout(() => {
                 const startTime = now();
-                const podIP = `10.${rand(0, 255)}.${rand(0, 255)}.${rand(2, 254)}`;
+                const podIP = node?.spec.podCIDR
+                    ? podIPFromCIDR(node.spec.podCIDR)
+                    : `10.${rand(0, 255)}.${rand(0, 255)}.${rand(2, 254)}`;
                 dispatch(updatePodStatus(name, namespace, {
                     phase: "Running",
                     startTime,
@@ -86,7 +90,7 @@ export function useKubelet(
                 }));
             }, 3_500));
         }
-    }, [Pods, dispatch]);
+    }, [Pods, Nodes, dispatch]);
 
     // Clear timers only on unmount
     useEffect(() => {
@@ -97,4 +101,12 @@ export function useKubelet(
 
 function rand(min: number, max: number) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+/** Pick a random host address within a /24 CIDR block (e.g. "10.244.1.0/24" → "10.244.1.x") */
+function podIPFromCIDR(cidr: string): string {
+    const base = cidr.split('/')[0];
+    const parts = base.split('.');
+    parts[3] = String(rand(2, 254));
+    return parts.join('.');
 }

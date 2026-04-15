@@ -37,6 +37,7 @@ export interface PodCondition {
 }
 
 export interface PodSpec {
+    nodeName?: string; // Name of the node the pod is scheduled on
     containers: Container[]; // List of containers that will be part of the pod
 }
 

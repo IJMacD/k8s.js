@@ -1,5 +1,5 @@
 import type { ActionDispatch } from "react";
-import { createDeployment, createPod, scaleDeployment, setDeploymentImage, createService, type Action, type AppState } from "./store";
+import { createDeployment, createPod, scaleDeployment, setDeploymentImage, createService, updateNodeSpec, deletePod, type Action, type AppState } from "./store";
 
 export function command(
     inputLine: string,
@@ -217,6 +217,34 @@ function kubectl(
         }));
         return Promise.resolve(`service/${svcName} exposed`);
     }
+    if (args[0] === "cordon" || args[0] === "uncordon") {
+        const name = args[1];
+        if (!name) throw Error(`kubectl ${args[0]}: missing node name`);
+        const node = state.Nodes.find(n => n.metadata.name === name);
+        if (!node) throw Error(`Error from server (NotFound): nodes "${name}" not found`);
+        const unschedulable = args[0] === "cordon";
+        dispatch(updateNodeSpec(name, { unschedulable }));
+        return Promise.resolve(`node/${name} ${unschedulable ? "cordoned" : "uncordoned"}`);
+    }
+    if (args[0] === "drain") {
+        const name = args[1];
+        if (!name) throw Error("kubectl drain: missing node name");
+        const node = state.Nodes.find(n => n.metadata.name === name);
+        if (!node) throw Error(`Error from server (NotFound): nodes "${name}" not found`);
+        // Cordon first
+        dispatch(updateNodeSpec(name, { unschedulable: true }));
+        // Evict all pods on the node
+        const nodePods = state.Pods.filter(p => p.spec.nodeName === name);
+        for (const pod of nodePods) {
+            dispatch(deletePod(pod.metadata.name, pod.metadata.namespace));
+        }
+        return Promise.resolve(
+            `node/${name} cordoned\n` +
+            nodePods.map(p => `pod/${p.metadata.name} evicted`).join("\n") +
+            (nodePods.length ? "\n" : "") +
+            `node/${name} drained`
+        );
+    }
     if (args[0] === "describe") {
         const resourceArg = args[1];
         if (!resourceArg) throw Error("kubectl describe: specify a resource (e.g. pod/<name>)");
@@ -242,7 +270,7 @@ function kubectl(
             const lines: string[] = [
                 `Name:         ${pod.metadata.name}`,
                 `Namespace:    ${pod.metadata.namespace}`,
-                `Node:         <none>`,
+                `Node:         ${pod.spec.nodeName ?? "<none>"}`,
                 `Start Time:   ${pod.status.startTime ?? "<none>"}`,
                 `Labels:       ${Object.entries(pod.metadata.labels ?? {}).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
                 `Annotations:  ${Object.entries(pod.metadata.annotations ?? {}).map(([k, v]) => `${k}=${v}`).join("\n              ") || "<none>"}`,
@@ -294,6 +322,37 @@ function kubectl(
                 `TargetPort:        ${svc.spec.ports.map(p => `${p.targetPort}/TCP`).join(", ")}`,
                 `Endpoints:         ${endpointIPs.length > 0 ? endpointIPs.join(",") : "<none>"}`,
                 `Age:               <unknown>`,
+            ];
+            return Promise.resolve(lines.join("\n"));
+        }
+
+        if (resourceArg.startsWith("node/") || args[1] === "node") {
+            const name = resourceArg.includes("/") ? resourceArg.slice(resourceArg.indexOf("/") + 1) : args[2];
+            if (!name) throw Error("kubectl describe node: missing node name");
+
+            const node = state.Nodes.find(n => n.metadata.name === name);
+            if (!node) throw Error(`Error from server (NotFound): nodes "${name}" not found`);
+
+            const nodePods = state.Pods.filter(p => p.spec.nodeName === name);
+            const internalIP = node.status.addresses.find(a => a.type === "InternalIP")?.address ?? "<none>";
+            const lines = [
+                `Name:               ${node.metadata.name}`,
+                `Labels:             ${Object.entries(node.metadata.labels).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
+                `Unschedulable:      ${node.spec.unschedulable}`,
+                `InternalIP:         ${internalIP}`,
+                ``,
+                `Capacity:`,
+                `  cpu:     ${node.status.capacity.cpu}`,
+                `  memory:  ${node.status.capacity.memory}`,
+                `  pods:    ${node.status.capacity.pods}`,
+                ``,
+                `Conditions:`,
+                `  Type             Status`,
+                ...node.status.conditions.map(c => `  ${c.type.padEnd(16)} ${c.status}`),
+                ``,
+                `Non-terminated Pods: (${nodePods.length})`,
+                `  Namespace    Name`,
+                ...nodePods.map(p => `  ${p.metadata.namespace.padEnd(12)} ${p.metadata.name}`),
             ];
             return Promise.resolve(lines.join("\n"));
         }

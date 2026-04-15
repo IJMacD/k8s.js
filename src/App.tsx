@@ -9,6 +9,28 @@ import { useReplicaSetController } from './useReplicaSetController';
 import { useKubelet } from './useKubelet';
 import { useStatusController } from './useStatusController';
 import { useEndpointsController } from './useEndpointsController';
+import { useScheduler } from './useScheduler';
+const now = new Date().toISOString();
+function makeNode(name: string, internalIP: string, podCIDR: string) {
+  return {
+    metadata: { uid: crypto.randomUUID(), name, labels: { 'kubernetes.io/hostname': name }, annotations: {}, creationTimestamp: now },
+    spec: { unschedulable: false, podCIDR },
+    status: {
+      conditions: [
+        { type: 'Ready' as const,          status: 'True'  as const, lastTransitionTime: now, reason: 'KubeletReady', message: 'kubelet is posting ready status' },
+        { type: 'MemoryPressure' as const, status: 'False' as const, lastTransitionTime: now },
+        { type: 'DiskPressure'   as const, status: 'False' as const, lastTransitionTime: now },
+        { type: 'PIDPressure'    as const, status: 'False' as const, lastTransitionTime: now },
+      ],
+      capacity:    { cpu: '4', memory: '8Gi', pods: '110' },
+      allocatable: { cpu: '4', memory: '8Gi', pods: '110' },
+      addresses: [
+        { type: 'InternalIP' as const, address: internalIP },
+        { type: 'Hostname'   as const, address: name },
+      ],
+    },
+  };
+}
 
 const initialState: AppState = {
   Deployments: [],
@@ -16,6 +38,11 @@ const initialState: AppState = {
   Pods: [],
   Services: [],
   Endpoints: [],
+  Nodes: [
+    makeNode('node-1', '192.168.0.1', '10.244.0.0/24'),
+    makeNode('node-2', '192.168.0.2', '10.244.1.0/24'),
+    makeNode('node-3', '192.168.0.3', '10.244.2.0/24'),
+  ],
 }
 
 function App() {
@@ -27,6 +54,7 @@ function App() {
   useKubelet(store, dispatch);
   useStatusController(store, dispatch);
   useEndpointsController(store, dispatch);
+  useScheduler(store, dispatch);
 
   function handleCommand(inputLine: string): Promise<string> {
     return command(inputLine, dispatch, store);
@@ -42,6 +70,7 @@ function App() {
           Pods={store.Pods}
           Services={store.Services}
           Endpoints={store.Endpoints}
+          Nodes={store.Nodes}
         />
       </div>
       <div style={{ display: consoleOpen ? undefined : 'none' }}>

@@ -2,6 +2,7 @@ import type { Deployment } from "./types/apps/deployment";
 import type { Pod } from "./types/apps/Pod";
 import type { ReplicaSet } from "./types/apps/ReplicaSet";
 import type { Service, Endpoints } from "./types/apps/Service";
+import type { KubeNode } from "./types/apps/Node";
 
 export interface AppState {
     Deployments: Deployment[];
@@ -9,6 +10,7 @@ export interface AppState {
     Pods: Pod[];
     Services: Service[];
     Endpoints: Endpoints[];
+    Nodes: KubeNode[];
 }
 
 const CreateDeploymentType = "CREATE_DEPLOYMENT";
@@ -23,6 +25,9 @@ const UpdateDeploymentStatusType = "UPDATE_DEPLOYMENT_STATUS";
 const SetDeploymentImageType = "SET_DEPLOYMENT_IMAGE";
 const CreateServiceType = "CREATE_SERVICE";
 const UpdateEndpointsType = "UPDATE_ENDPOINTS";
+const CreateNodeType = "CREATE_NODE";
+const UpdateNodeSpecType = "UPDATE_NODE_SPEC";
+const BindPodToNodeType = "BIND_POD_TO_NODE";
 
 export type ActionType =
     | typeof CreateDeploymentType
@@ -36,7 +41,10 @@ export type ActionType =
     | typeof UpdateDeploymentStatusType
     | typeof SetDeploymentImageType
     | typeof CreateServiceType
-    | typeof UpdateEndpointsType;
+    | typeof UpdateEndpointsType
+    | typeof CreateNodeType
+    | typeof UpdateNodeSpecType
+    | typeof BindPodToNodeType;
 
 export interface CreateDeploymentAction {
     type: typeof CreateDeploymentType;
@@ -85,6 +93,49 @@ export function updateEndpoints(endpoints: import("./types/apps/Service").Endpoi
     return { type: UpdateEndpointsType, payload: endpoints };
 }
 
+export interface CreateNodeAction {
+    type: typeof CreateNodeType;
+    payload: {
+        name: string;
+        cpu: string;
+        memory: string;
+        internalIP: string;
+    };
+}
+
+export function createNode(
+    name: string,
+    resources: { cpu: string; memory: string; internalIP: string },
+): CreateNodeAction {
+    return { type: CreateNodeType, payload: { name, ...resources } };
+}
+
+export interface UpdateNodeSpecAction {
+    type: typeof UpdateNodeSpecType;
+    payload: { name: string; patch: Partial<import("./types/apps/Node").NodeSpec> };
+}
+
+export function updateNodeSpec(
+    name: string,
+    patch: Partial<import("./types/apps/Node").NodeSpec>,
+): UpdateNodeSpecAction {
+    return { type: UpdateNodeSpecType, payload: { name, patch } };
+}
+
+export interface BindPodToNodeAction {
+    type: typeof BindPodToNodeType;
+    payload: { podName: string; namespace: string; nodeName: string; hostIP: string };
+}
+
+export function bindPodToNode(
+    podName: string,
+    namespace: string,
+    nodeName: string,
+    hostIP: string,
+): BindPodToNodeAction {
+    return { type: BindPodToNodeType, payload: { podName, namespace, nodeName, hostIP } };
+}
+
 export interface SetDeploymentImageAction {
     type: typeof SetDeploymentImageType;
     payload: { name: string; namespace: string; container: string; image: string };
@@ -111,7 +162,10 @@ export type Action =
     | UpdateDeploymentStatusAction
     | SetDeploymentImageAction
     | CreateServiceAction
-    | UpdateEndpointsAction;
+    | UpdateEndpointsAction
+    | CreateNodeAction
+    | UpdateNodeSpecAction
+    | BindPodToNodeAction;
 
 export interface UpdateReplicaSetStatusAction {
     type: typeof UpdateReplicaSetStatusType;
@@ -495,6 +549,55 @@ export const reducer = (state: AppState, action: Action): AppState => {
                 ),
                 ep,
             ],
+        };
+    }
+    if (action.type === CreateNodeType) {
+        const { name, cpu, memory, internalIP } = action.payload;
+        const now = new Date().toISOString();
+        const node: KubeNode = {
+            metadata: {
+                uid: crypto.randomUUID(),
+                name,
+                labels: { "kubernetes.io/hostname": name },
+                annotations: {},
+                creationTimestamp: now,
+            },
+            spec: { unschedulable: false },
+            status: {
+                conditions: [
+                    { type: "Ready", status: "True", lastTransitionTime: now, reason: "KubeletReady", message: "kubelet is posting ready status" },
+                    { type: "MemoryPressure", status: "False", lastTransitionTime: now },
+                    { type: "DiskPressure",   status: "False", lastTransitionTime: now },
+                    { type: "PIDPressure",    status: "False", lastTransitionTime: now },
+                ],
+                capacity:    { cpu, memory, pods: "110" },
+                allocatable: { cpu, memory, pods: "110" },
+                addresses: [
+                    { type: "InternalIP", address: internalIP },
+                    { type: "Hostname",   address: name },
+                ],
+            },
+        };
+        return { ...state, Nodes: [...state.Nodes, node] };
+    }
+    if (action.type === UpdateNodeSpecType) {
+        const { name, patch } = action.payload;
+        return {
+            ...state,
+            Nodes: state.Nodes.map(n =>
+                n.metadata.name === name ? { ...n, spec: { ...n.spec, ...patch } } : n
+            ),
+        };
+    }
+    if (action.type === BindPodToNodeType) {
+        const { podName, namespace, nodeName, hostIP } = action.payload;
+        return {
+            ...state,
+            Pods: state.Pods.map(p =>
+                p.metadata.name === podName && p.metadata.namespace === namespace
+                    ? { ...p, spec: { ...p.spec, nodeName }, status: { ...p.status, hostIP } }
+                    : p
+            ),
         };
     }
     return state;

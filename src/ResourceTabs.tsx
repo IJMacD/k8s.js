@@ -41,13 +41,13 @@ function AgeCell({ timestamp }: { timestamp: string }) {
   return <td>{timestamp ? age(timestamp) : ''}</td>;
 }
 
-type Tab = 'Deployments' | 'ReplicaSets' | 'Pods' | 'Services';
+type Tab = 'Deployments' | 'ReplicaSets' | 'Pods' | 'Services' | 'Nodes';
 
-const TABS: Tab[] = ['Deployments', 'ReplicaSets', 'Pods', 'Services'];
+const TABS: Tab[] = ['Deployments', 'ReplicaSets', 'Pods', 'Services', 'Nodes'];
 
-type Props = Pick<AppState, 'Deployments' | 'ReplicaSets' | 'Pods' | 'Services' | 'Endpoints'>;
+type Props = Pick<AppState, 'Deployments' | 'ReplicaSets' | 'Pods' | 'Services' | 'Endpoints' | 'Nodes'>;
 
-export function ResourceTabs({ Deployments, ReplicaSets, Pods, Services, Endpoints }: Props) {
+export function ResourceTabs({ Deployments, ReplicaSets, Pods, Services, Endpoints, Nodes }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('Deployments');
 
   return (
@@ -177,6 +177,44 @@ export function ResourceTabs({ Deployments, ReplicaSets, Pods, Services, Endpoin
                     <td>{s.spec.ports.map(p => `${p.port}/TCP`).join(', ')}</td>
                     <td>{ips.length > 0 ? ips.join(', ') : '—'}</td>
                     <AgeCell timestamp={s.metadata.creationTimestamp} />
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+        {activeTab === 'Nodes' && (
+          <table className="resource-tabs__table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Roles</th>
+                <th>Internal IP</th>
+                <th>CPU</th>
+                <th>Memory</th>
+                <th>Pods</th>
+                <th>Age</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Nodes.map(n => {
+                const ready = n.status.conditions.find(c => c.type === 'Ready')?.status === 'True';
+                const status = n.spec.unschedulable
+                  ? (ready ? 'Ready,SchedulingDisabled' : 'NotReady,SchedulingDisabled')
+                  : (ready ? 'Ready' : 'NotReady');
+                const ip = n.status.addresses.find(a => a.type === 'InternalIP')?.address ?? '—';
+                const podCount = Pods.filter(p => p.spec.nodeName === n.metadata.name).length;
+                return (
+                  <tr key={n.metadata.name}>
+                    <td>{n.metadata.name}</td>
+                    <td>{status}</td>
+                    <td>{'<none>'}</td>
+                    <td>{ip}</td>
+                    <td>{n.status.capacity.cpu}</td>
+                    <td>{n.status.capacity.memory}</td>
+                    <td>{podCount}</td>
+                    <AgeCell timestamp={n.metadata.creationTimestamp} />
                   </tr>
                 );
               })}
