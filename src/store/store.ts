@@ -80,6 +80,7 @@ export interface CreatePodAction {
         namespace: string;
         image: string;
         containerName?: string;
+        ports?: Array<{ containerPort: number }>;
         labels?: Record<string, string>;
         restartPolicy?: "Always" | "OnFailure" | "Never";
         creationTimestamp: string;
@@ -437,7 +438,7 @@ export function createDeployment(
 
 export function createPod(
     name: string,
-    spec: { image: string; containerName?: string; labels?: Record<string, string>; restartPolicy?: "Always" | "OnFailure" | "Never" },
+    spec: { image: string; containerName?: string; ports?: Array<{ containerPort: number }>; labels?: Record<string, string>; restartPolicy?: "Always" | "OnFailure" | "Never" },
     namespace = "default",
     ownerRef?: { kind: string; apiVersion: string; name: string; uid: string },
 ): CreatePodAction {
@@ -448,6 +449,7 @@ export function createPod(
             namespace,
             image: spec.image,
             containerName: spec.containerName,
+            ports: spec.ports,
             labels: spec.labels,
             restartPolicy: spec.restartPolicy,
             creationTimestamp: new Date().toISOString(),
@@ -605,7 +607,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
     }
     if (action.type === CreatePodType) {
-        const { name, namespace, image, containerName, labels, restartPolicy, creationTimestamp, ownerReferences } = action.payload;
+        const { name, namespace, image, containerName, ports, labels, restartPolicy, creationTimestamp, ownerReferences } = action.payload;
         return {
             ...state,
             Pods: [
@@ -623,7 +625,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
                         phase: "Pending",
                     },
                     spec: {
-                        containers: [{ name: containerName ?? name, image }],
+                        containers: [{ name: containerName ?? name, image, ...(ports && { ports }) }],
                         ...(restartPolicy && { restartPolicy }),
                     },
                 },

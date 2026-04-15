@@ -167,7 +167,11 @@ export function ResourceTabs({ Deployments, ReplicaSets, Pods, Services, Endpoin
                 const ep = Endpoints.find(
                   e => e.metadata.name === s.metadata.name && e.metadata.namespace === s.metadata.namespace
                 );
-                const ips = ep?.subsets.flatMap(sub => sub.addresses.map(a => a.ip)) ?? [];
+                const endpoints = ep?.subsets.flatMap(sub =>
+                  sub.addresses.flatMap(a =>
+                    sub.ports.map(p => `${a.ip}:${p.port}`)
+                  )
+                ) ?? [];
                 return (
                   <tr key={`${s.metadata.namespace}/${s.metadata.name}`}>
                     <td>{s.metadata.namespace}</td>
@@ -175,7 +179,7 @@ export function ResourceTabs({ Deployments, ReplicaSets, Pods, Services, Endpoin
                     <td>{s.spec.type}</td>
                     <td>{s.spec.clusterIP}</td>
                     <td>{s.spec.ports.map(p => `${p.port}/TCP`).join(', ')}</td>
-                    <td>{ips.length > 0 ? ips.join(', ') : '—'}</td>
+                    <td>{endpoints.length > 0 ? endpoints.join(', ') : '—'}</td>
                     <AgeCell timestamp={s.metadata.creationTimestamp} />
                   </tr>
                 );

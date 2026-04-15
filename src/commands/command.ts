@@ -2,6 +2,7 @@ import type { ActionDispatch } from "react";
 import { type Action, type AppState } from "../store/store";
 import { kubectl } from "./kubectl";
 import { ping } from "./ping";
+import { curl } from "./curl";
 
 // Splits a command line into tokens, honouring single and double quotes so
 // that values containing spaces (e.g. --schedule='*/1 * * * *') are kept
@@ -63,6 +64,8 @@ export function command(
             return;
         } else if (command === "ping") {
             resolve(ping(args, state));
+        } else if (command === "curl") {
+            resolve(curl(args, state));
         } else if (command === "kubectl") {
             resolve(kubectl(args, dispatch, state));
         } else {

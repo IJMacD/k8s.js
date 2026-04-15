@@ -57,6 +57,7 @@ export function useReplicaSetController(
                             {
                                 image: containers[0]?.image ?? "",
                                 containerName: containers[0]?.name,
+                                ports: containers[0]?.ports,
                                 labels: rs.metadata.labels,
                             },
                             namespace,
