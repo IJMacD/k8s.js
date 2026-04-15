@@ -25,7 +25,7 @@ export async function* kubectl(
     rawArgs: string[],
     dispatch: ActionDispatch<[action: Action]>,
     getState: () => AppState,
-): AsyncGeneratornerator<string> {
+): AsyncGenerator<string> {
     const state = getState();
     const { namespace, args } = parseKubectlArgs(rawArgs);
     if (args[0] === "run") {

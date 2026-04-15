@@ -379,7 +379,7 @@ export interface UpdateDeploymentStatusAction {
 export function updateReplicaSetStatus(
     name: string,
     namespace: string,
-    status: UpdateReplicaSetStatusAction["payload"] extends { name: string; namespace: string } ? Omit<UpdateReplicaSetStatusAction["payload"], "name" | "namespace"> : never,
+    status: Omit<UpdateReplicaSetStatusAction["payload"], "name" | "namespace">,
 ): UpdateReplicaSetStatusAction {
     return { type: UpdateReplicaSetStatusType, payload: { name, namespace, ...status } };
 }
@@ -387,7 +387,7 @@ export function updateReplicaSetStatus(
 export function updateDeploymentStatus(
     name: string,
     namespace: string,
-    status: UpdateDeploymentStatusAction["payload"] extends { name: string; namespace: string } ? Omit<UpdateDeploymentStatusAction["payload"], "name" | "namespace"> : never,
+    status: Omit<UpdateDeploymentStatusAction["payload"], "name" | "namespace">,
 ): UpdateDeploymentStatusAction {
     return { type: UpdateDeploymentStatusType, payload: { name, namespace, ...status } };
 }
