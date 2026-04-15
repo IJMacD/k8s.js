@@ -97,7 +97,7 @@ export function Console({ onCommand, onDismiss }: { onCommand: (command: string)
             submitInput();
         } else if (event.key === 'ArrowUp') {
             const atStart = inputRef.current?.selectionStart === 0;
-            if (atStart && historyIndex < inputHistory.length - 1) {
+            if ((historyIndex !== -1 || atStart) && historyIndex < inputHistory.length - 1) {
                 event.preventDefault();
                 const newIndex = historyIndex + 1;
                 setHistoryIndex(newIndex);
@@ -106,13 +106,13 @@ export function Console({ onCommand, onDismiss }: { onCommand: (command: string)
             }
         } else if (event.key === 'ArrowDown') {
             const atEnd = inputRef.current?.selectionStart === input.length;
-            if (atEnd && historyIndex > 0) {
+            if ((historyIndex !== -1 || atEnd) && historyIndex > 0) {
                 event.preventDefault();
                 const newIndex = historyIndex - 1;
                 setHistoryIndex(newIndex);
                 setInput(inputHistory[inputHistory.length - 1 - newIndex]);
                 moveCursorToEndRef.current = true;
-            } else if (atEnd && historyIndex === 0) {
+            } else if ((historyIndex !== -1 || atEnd) && historyIndex === 0) {
                 event.preventDefault();
                 setHistoryIndex(-1);
                 setInput('');
