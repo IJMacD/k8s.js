@@ -1,15 +1,39 @@
 export interface Pod {
     metadata: PodMetadata;
+    status: PodStatus;
     spec: PodSpec;
 }
 
-export interface PodMetadata {
+export interface PodTemplateSpec {
+    metadata: PodTemplateMetadata;
+    spec: PodSpec;
+}
+
+export interface PodTemplateMetadata {
     namespace: string;
     name: string;
-    uid: string;
     labels?: Record<string, string>; // A map of {key: value} pairs to categorize the pod
     annotations?: Record<string, string>; // A map of {key: value} pairs to store arbitrary metadata about the pod
+}
+
+export interface PodMetadata extends PodTemplateMetadata {
+    uid: string;
     creationTimestamp: string; // ISO 8601 format timestamp indicating when the pod was created
+}
+
+export interface PodStatus {
+    phase: "Pending" | "Running" | "Succeeded" | "Failed" | "Unknown"; // Current phase of the pod
+    conditions?: PodCondition[]; // Optional list of conditions that describe the current state of the pod
+    hostIP?: string; // Optional IP address of the node hosting the pod
+    podIP?: string; // Optional IP address assigned to the pod
+    startTime?: string; // Optional ISO 8601 format timestamp indicating when the pod started running
+}
+
+export interface PodCondition {
+    type: string; // Type of condition (e.g., "Ready", "Initialized")
+    status: "True" | "False" | "Unknown"; // Status of the condition
+    lastProbeTime?: string; // Optional ISO 8601 format timestamp indicating when the condition was last probed
+    lastTransitionTime?: string; // Optional ISO 8601 format timestamp indicating when the condition last transitioned from one status to another
 }
 
 export interface PodSpec {

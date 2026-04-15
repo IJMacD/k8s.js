@@ -1,4 +1,4 @@
-import type { PodMetadata, PodSpec } from "./pod";
+import type { PodTemplateSpec } from "./Pod";
 
 export interface Deployment {
     metadata: DeploymentMetadata;
@@ -33,11 +33,6 @@ export interface DeploymentSpec {
 
 export interface LabelSelector {
     matchLabels: Record<string, string>; // A map of {key: value} pairs to match against the labels of pods
-}
-
-export interface PodTemplateSpec {
-    metadata: PodMetadata; // Metadata for the pods created by this deployment
-    spec: PodSpec; // Specification for the pods created by this deployment
 }
 
 export interface DeploymentStrategy {

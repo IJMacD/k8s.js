@@ -4,14 +4,15 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { useSavedState } from "./useSavedState";
 
 const PROMPT = '> ';
 
-export function Console({ onCommand }: { onCommand: (command: string) => Promise<string> }) {
+export function Console({ onCommand, onDismiss }: { onCommand: (command: string) => Promise<string>; onDismiss?: () => void }) {
     const [input, setInput] = useState('');
     const [output, setOutput] = useState<string[]>([]);
     const [inputQueue, setInputQueue] = useState<string[]>([]);
-    const [inputHistory, setInputHistory] = useState<string[]>([]);
+    const [inputHistory, setInputHistory] = useSavedState<string[]>('console.inputHistory', []);
     const [historyIndex, setHistoryIndex] = useState<number>(-1);
 
     const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -59,18 +60,22 @@ export function Console({ onCommand }: { onCommand: (command: string) => Promise
      // Handle up/down arrow keys for input history navigation
      const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
         if (event.key === 'ArrowUp') {
+            event.preventDefault();
             // Navigate up in history
             if (historyIndex < inputHistory.length - 1) {
                 const newIndex = historyIndex + 1;
                 setHistoryIndex(newIndex);
                 setInput(inputHistory[inputHistory.length - 1 - newIndex]);
+                moveCursorToEndRef.current = true;
             }
         } else if (event.key === 'ArrowDown') {
+            event.preventDefault();
             // Navigate down in history
             if (historyIndex > 0) {
                 const newIndex = historyIndex - 1;
                 setHistoryIndex(newIndex);
                 setInput(inputHistory[inputHistory.length - 1 - newIndex]);
+                moveCursorToEndRef.current = true;
             } else {
                 setHistoryIndex(-1);
                 setInput('');
@@ -79,6 +84,15 @@ export function Console({ onCommand }: { onCommand: (command: string) => Promise
     };
 
     const inputRef = useRef<HTMLInputElement>(null);
+    const moveCursorToEndRef = useRef(false);
+
+    useEffect(() => {
+        if (moveCursorToEndRef.current && inputRef.current) {
+            const len = inputRef.current.value.length;
+            inputRef.current.setSelectionRange(len, len);
+            moveCursorToEndRef.current = false;
+        }
+    }, [input]);
 
     // Focus the input field when the component mounts
     useEffect(() => {
@@ -99,20 +113,33 @@ export function Console({ onCommand }: { onCommand: (command: string) => Promise
     }
 
     return (
-        <div style={{ backgroundColor: '#1e1e1e', color: '#d4d4d4', padding: '5px', fontFamily: 'monospace', fontSize: '16px', textAlign: 'left', height: '400px', overflowY: 'auto', borderTop: '1px solid #333' }} onClick={handleConsoleClick}>
-            <div style={{ height: 'calc(100% - 40px)', overflowY: 'auto' }} ref={outputRef}>
+        <div style={{ backgroundColor: '#1e1e1e', color: '#d4d4d4', fontFamily: 'monospace', fontSize: '16px', textAlign: 'left', height: '400px', display: 'flex', flexDirection: 'column', borderTop: '1px solid #333' }} onClick={handleConsoleClick}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 8px', borderBottom: '1px solid #333', flexShrink: 0 }}>
+                <span style={{ fontSize: '12px', color: '#888', userSelect: 'none' }}>TERMINAL</span>
+                {onDismiss && (
+                    <button
+                        onClick={e => { e.stopPropagation(); onDismiss(); }}
+                        style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '16px', lineHeight: 1, padding: '0 2px' }}
+                        title="Minimise terminal"
+                        aria-label="Minimise terminal"
+                    >
+                        ⌃
+                    </button>
+                )}
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '5px' }} ref={outputRef}>
                 {output.map((line, index) => (
-                    <div key={index}>{line}</div>
+                    <div key={index} style={{ whiteSpace: 'pre-wrap' }}>{line}</div>
                 ))}
             </div>
-            <form onSubmit={handleInputSubmit} style={{ display: 'flex', alignItems: 'center' }}>
+            <form onSubmit={handleInputSubmit} style={{ display: 'flex', alignItems: 'center', padding: '0 5px', flexShrink: 0 }}>
                 <span>{PROMPT}</span>
                 <input
                     type="text"
                     value={input}
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}
-                    style={{  padding: '4px', marginLeft: '4px', backgroundColor: '#1e1e1e', color: '#d4d4d4', border: 'none', outline: 'none', flex: 1, fontFamily: 'monospace', fontSize: '16px' }}
+                    style={{ padding: '4px', marginLeft: '4px', backgroundColor: '#1e1e1e', color: '#d4d4d4', border: 'none', outline: 'none', flex: 1, fontFamily: 'monospace', fontSize: '16px' }}
                     autoFocus
                     ref={inputRef}
                 />

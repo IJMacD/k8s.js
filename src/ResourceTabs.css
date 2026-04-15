@@ -1,0 +1,77 @@
+.resource-tabs {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Tab bar */
+.resource-tabs__tablist {
+  display: flex;
+  width: 100%;
+  border-bottom: 2px solid var(--border);
+  gap: 0;
+}
+
+.resource-tabs__tab {
+  flex: 1;
+  padding: 0.6em 1em;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.95em;
+  color: var(--text);
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.resource-tabs__tab:hover {
+  color: var(--text-h);
+  background: var(--accent-bg);
+}
+
+.resource-tabs__tab[aria-selected="true"] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+/* Panel */
+.resource-tabs__panel {
+  padding: 1em 0;
+}
+
+/* Table */
+.resource-tabs__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+  font-family: var(--mono);
+}
+
+.resource-tabs__table th,
+.resource-tabs__table td {
+  text-align: left;
+  padding: 0.5em 0.75em;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.resource-tabs__table th {
+  background: var(--code-bg);
+  color: var(--text-h);
+  font-weight: 600;
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.resource-tabs__table tbody tr:hover {
+  background: var(--accent-bg);
+}
+
+.resource-tabs__table td:last-child {
+  color: var(--text);
+  font-size: 0.85em;
+}
