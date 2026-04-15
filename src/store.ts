@@ -1,11 +1,14 @@
 import type { Deployment } from "./types/apps/deployment";
 import type { Pod } from "./types/apps/Pod";
 import type { ReplicaSet } from "./types/apps/ReplicaSet";
+import type { Service, Endpoints } from "./types/apps/Service";
 
 export interface AppState {
     Deployments: Deployment[];
     ReplicaSets: ReplicaSet[];
     Pods: Pod[];
+    Services: Service[];
+    Endpoints: Endpoints[];
 }
 
 const CreateDeploymentType = "CREATE_DEPLOYMENT";
@@ -18,6 +21,8 @@ const UpdatePodStatusType = "UPDATE_POD_STATUS";
 const UpdateReplicaSetStatusType = "UPDATE_REPLICASET_STATUS";
 const UpdateDeploymentStatusType = "UPDATE_DEPLOYMENT_STATUS";
 const SetDeploymentImageType = "SET_DEPLOYMENT_IMAGE";
+const CreateServiceType = "CREATE_SERVICE";
+const UpdateEndpointsType = "UPDATE_ENDPOINTS";
 
 export type ActionType =
     | typeof CreateDeploymentType
@@ -29,7 +34,9 @@ export type ActionType =
     | typeof UpdatePodStatusType
     | typeof UpdateReplicaSetStatusType
     | typeof UpdateDeploymentStatusType
-    | typeof SetDeploymentImageType;
+    | typeof SetDeploymentImageType
+    | typeof CreateServiceType
+    | typeof UpdateEndpointsType;
 
 export interface CreateDeploymentAction {
     type: typeof CreateDeploymentType;
@@ -43,9 +50,39 @@ export interface CreatePodAction {
         namespace: string;
         image: string;
         containerName?: string;
+        labels?: Record<string, string>;
         creationTimestamp: string;
         ownerReplicaSet?: string;
     };
+}
+
+export interface CreateServiceAction {
+    type: typeof CreateServiceType;
+    payload: {
+        name: string;
+        namespace: string;
+        selector: Record<string, string>;
+        ports: Array<{ port: number; targetPort: number; protocol?: "TCP" | "UDP" }>;
+        clusterIP: string;
+        serviceType: import("./types/apps/Service").ServiceType;
+    };
+}
+
+export function createService(
+    name: string,
+    payload: Omit<CreateServiceAction["payload"], "name" | "namespace">,
+    namespace = "default",
+): CreateServiceAction {
+    return { type: CreateServiceType, payload: { name, namespace, ...payload } };
+}
+
+export interface UpdateEndpointsAction {
+    type: typeof UpdateEndpointsType;
+    payload: import("./types/apps/Service").Endpoints;
+}
+
+export function updateEndpoints(endpoints: import("./types/apps/Service").Endpoints): UpdateEndpointsAction {
+    return { type: UpdateEndpointsType, payload: endpoints };
 }
 
 export interface SetDeploymentImageAction {
@@ -72,7 +109,9 @@ export type Action =
     | UpdatePodStatusAction
     | UpdateReplicaSetStatusAction
     | UpdateDeploymentStatusAction
-    | SetDeploymentImageAction;
+    | SetDeploymentImageAction
+    | CreateServiceAction
+    | UpdateEndpointsAction;
 
 export interface UpdateReplicaSetStatusAction {
     type: typeof UpdateReplicaSetStatusType;
@@ -191,7 +230,7 @@ export function createDeployment(
 
 export function createPod(
     name: string,
-    spec: { image: string; containerName?: string },
+    spec: { image: string; containerName?: string; labels?: Record<string, string> },
     namespace = "default",
     ownerReplicaSet?: string,
 ): CreatePodAction {
@@ -202,6 +241,7 @@ export function createPod(
             namespace,
             image: spec.image,
             containerName: spec.containerName,
+            labels: spec.labels,
             creationTimestamp: new Date().toISOString(),
             ownerReplicaSet,
         },
@@ -354,7 +394,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
     }
     if (action.type === CreatePodType) {
-        const { name, namespace, image, containerName, creationTimestamp, ownerReplicaSet } = action.payload;
+        const { name, namespace, image, containerName, labels, creationTimestamp, ownerReplicaSet } = action.payload;
         return {
             ...state,
             Pods: [
@@ -365,6 +405,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
                         namespace,
                         uid: crypto.randomUUID(),
                         creationTimestamp,
+                        ...(labels && { labels }),
                         ...(ownerReplicaSet && {
                             annotations: { ownerReplicaSet },
                         }),
@@ -410,6 +451,50 @@ export const reducer = (state: AppState, action: Action): AppState => {
                     ? { ...d, status: { ...d.status, readyReplicas, availableReplicas, updatedReplicas } }
                     : d
             ),
+        };
+    }
+    if (action.type === CreateServiceType) {
+        const { name, namespace, selector, ports, clusterIP, serviceType } = action.payload;
+        const svc: Service = {
+            metadata: {
+                uid: crypto.randomUUID(),
+                name,
+                namespace,
+                labels: {},
+                annotations: {},
+                creationTimestamp: new Date().toISOString(),
+            },
+            spec: {
+                type: serviceType,
+                selector,
+                clusterIP,
+                ports: ports.map(p => ({ port: p.port, targetPort: p.targetPort, protocol: p.protocol ?? "TCP" })),
+            },
+            status: {},
+        };
+        const initialEndpoints: Endpoints = {
+            metadata: { name, namespace },
+            subsets: [],
+        };
+        return {
+            ...state,
+            Services: [...state.Services, svc],
+            Endpoints: [
+                ...state.Endpoints.filter(e => !(e.metadata.name === name && e.metadata.namespace === namespace)),
+                initialEndpoints,
+            ],
+        };
+    }
+    if (action.type === UpdateEndpointsType) {
+        const ep = action.payload;
+        return {
+            ...state,
+            Endpoints: [
+                ...state.Endpoints.filter(
+                    e => !(e.metadata.name === ep.metadata.name && e.metadata.namespace === ep.metadata.namespace)
+                ),
+                ep,
+            ],
         };
     }
     return state;

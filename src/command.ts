@@ -1,5 +1,5 @@
 import type { ActionDispatch } from "react";
-import { createDeployment, createPod, scaleDeployment, setDeploymentImage, type Action, type AppState } from "./store";
+import { createDeployment, createPod, scaleDeployment, setDeploymentImage, createService, type Action, type AppState } from "./store";
 
 export function command(
     inputLine: string,
@@ -34,6 +34,28 @@ export function command(
             }
             const pod = state.Pods.find(p => p.status.podIP === target);
             if (!pod) {
+                // Also accept a service clusterIP — round-robin to any ready endpoint
+                const svc = state.Services.find(s => s.spec.clusterIP === target);
+                if (svc) {
+                    const ep = state.Endpoints.find(
+                        e => e.metadata.name === svc.metadata.name && e.metadata.namespace === svc.metadata.namespace,
+                    );
+                    const addresses = ep?.subsets.flatMap(s => s.addresses) ?? [];
+                    if (addresses.length === 0) {
+                        resolve(`ping: connect to host ${target}: Connection refused`);
+                        return;
+                    }
+                    const ms = () => (0.03 + Math.random() * 0.04).toFixed(3);
+                    resolve(
+                        `PING ${target} (${target}): 56 data bytes\n` +
+                        `64 bytes from ${target}: icmp_seq=0 ttl=64 time=${ms()} ms\n` +
+                        `64 bytes from ${target}: icmp_seq=1 ttl=64 time=${ms()} ms\n` +
+                        `64 bytes from ${target}: icmp_seq=2 ttl=64 time=${ms()} ms\n` +
+                        `\n--- ${target} ping statistics ---\n` +
+                        `3 packets transmitted, 3 packets received, 0.0% packet loss`
+                    );
+                    return;
+                }
                 resolve(`ping: cannot resolve ${target}: Name or service not known`);
                 return;
             }
@@ -128,6 +150,40 @@ function kubectl(
         dispatch(scaleDeployment(resourceName, replicas));
         return Promise.resolve(`deployment.apps/${resourceName} scaled`);
     }
+    if (args[0] === "expose") {
+        // kubectl expose deployment <name> --port=80 [--target-port=8080] [--type=ClusterIP]
+        if (args[1] !== "deployment") throw Error("kubectl expose: only 'deployment' resources are supported");
+        const name = args[2];
+        if (!name) throw Error("kubectl expose: missing deployment name");
+
+        const exists = state.Deployments.find(d => d.metadata.name === name);
+        if (!exists) throw Error(`Error from server (NotFound): deployments "${name}" not found`);
+
+        const portFlag = args.find(a => a.startsWith("--port="));
+        if (!portFlag) throw Error("kubectl expose: --port=PORT is required");
+        const port = parseInt(portFlag.slice("--port=".length), 10);
+        if (isNaN(port)) throw Error("kubectl expose: --port must be a number");
+
+        const targetPortFlag = args.find(a => a.startsWith("--target-port="));
+        const targetPort = targetPortFlag ? parseInt(targetPortFlag.slice("--target-port=".length), 10) : port;
+
+        const typeFlag = args.find(a => a.startsWith("--type="));
+        const serviceType = (typeFlag?.slice("--type=".length) ?? "ClusterIP") as import("./types/apps/Service").ServiceType;
+
+        const svcNameFlag = args.find(a => a.startsWith("--name="));
+        const svcName = svcNameFlag?.slice("--name=".length) ?? name;
+
+        // Generate a stable fake clusterIP
+        const clusterIP = `10.96.${Math.floor(Math.random() * 254) + 1}.${Math.floor(Math.random() * 254) + 1}`;
+
+        dispatch(createService(svcName, {
+            selector: { app: name },
+            ports: [{ port, targetPort }],
+            clusterIP,
+            serviceType,
+        }));
+        return Promise.resolve(`service/${svcName} exposed`);
+    }
     if (args[0] === "describe") {
         const resourceArg = args[1];
         if (!resourceArg) throw Error("kubectl describe: specify a resource (e.g. pod/<name>)");
@@ -174,6 +230,37 @@ function kubectl(
                 ...(pod.status.conditions?.map(
                     c => `  ${c.type.padEnd(12)} ${c.status}`,
                 ) ?? [`  <none>`]),
+            ];
+            return Promise.resolve(lines.join("\n"));
+        }
+
+        if (resourceArg.startsWith("service/") || resourceArg.startsWith("svc/") || args[1] === "service" || args[1] === "svc") {
+            const name = resourceArg.includes("/")
+                ? resourceArg.slice(resourceArg.indexOf("/") + 1)
+                : args[2];
+            if (!name) throw Error("kubectl describe service: missing service name");
+
+            const svc = state.Services.find(
+                s => s.metadata.name === name && s.metadata.namespace === namespace,
+            );
+            if (!svc) throw Error(`Error from server (NotFound): services "${name}" not found`);
+
+            const ep = state.Endpoints.find(
+                e => e.metadata.name === name && e.metadata.namespace === namespace,
+            );
+            const endpointIPs = ep?.subsets.flatMap(s => s.addresses.map(a => a.ip)) ?? [];
+
+            const lines = [
+                `Name:              ${svc.metadata.name}`,
+                `Namespace:         ${svc.metadata.namespace}`,
+                `Labels:            ${Object.entries(svc.metadata.labels).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
+                `Selector:          ${Object.entries(svc.spec.selector).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
+                `Type:              ${svc.spec.type}`,
+                `IP:                ${svc.spec.clusterIP}`,
+                `Port:              ${svc.spec.ports.map(p => `${p.port}/TCP`).join(", ")}`,
+                `TargetPort:        ${svc.spec.ports.map(p => `${p.targetPort}/TCP`).join(", ")}`,
+                `Endpoints:         ${endpointIPs.length > 0 ? endpointIPs.join(",") : "<none>"}`,
+                `Age:               <unknown>`,
             ];
             return Promise.resolve(lines.join("\n"));
         }

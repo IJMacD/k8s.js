@@ -8,11 +8,14 @@ import { useDeploymentController } from './useDeploymentController';
 import { useReplicaSetController } from './useReplicaSetController';
 import { useKubelet } from './useKubelet';
 import { useStatusController } from './useStatusController';
+import { useEndpointsController } from './useEndpointsController';
 
 const initialState: AppState = {
   Deployments: [],
   ReplicaSets: [],
   Pods: [],
+  Services: [],
+  Endpoints: [],
 }
 
 function App() {
@@ -23,6 +26,7 @@ function App() {
   useReplicaSetController(store, dispatch);
   useKubelet(store, dispatch);
   useStatusController(store, dispatch);
+  useEndpointsController(store, dispatch);
 
   function handleCommand(inputLine: string): Promise<string> {
     return command(inputLine, dispatch, store);
@@ -36,6 +40,8 @@ function App() {
           Deployments={store.Deployments}
           ReplicaSets={store.ReplicaSets}
           Pods={store.Pods}
+          Services={store.Services}
+          Endpoints={store.Endpoints}
         />
       </div>
       <div style={{ display: consoleOpen ? undefined : 'none' }}>

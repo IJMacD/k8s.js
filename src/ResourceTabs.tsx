@@ -41,13 +41,13 @@ function AgeCell({ timestamp }: { timestamp: string }) {
   return <td>{timestamp ? age(timestamp) : ''}</td>;
 }
 
-type Tab = 'Deployments' | 'ReplicaSets' | 'Pods';
+type Tab = 'Deployments' | 'ReplicaSets' | 'Pods' | 'Services';
 
-const TABS: Tab[] = ['Deployments', 'ReplicaSets', 'Pods'];
+const TABS: Tab[] = ['Deployments', 'ReplicaSets', 'Pods', 'Services'];
 
-type Props = Pick<AppState, 'Deployments' | 'ReplicaSets' | 'Pods'>;
+type Props = Pick<AppState, 'Deployments' | 'ReplicaSets' | 'Pods' | 'Services' | 'Endpoints'>;
 
-export function ResourceTabs({ Deployments, ReplicaSets, Pods }: Props) {
+export function ResourceTabs({ Deployments, ReplicaSets, Pods, Services, Endpoints }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('Deployments');
 
   return (
@@ -143,6 +143,40 @@ export function ResourceTabs({ Deployments, ReplicaSets, Pods }: Props) {
                     <td>{p.status.podIP ?? '—'}</td>
                     <td>{p.spec.containers.map(c => c.image).join(', ')}</td>
                     <AgeCell timestamp={p.metadata.creationTimestamp} />
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+        {activeTab === 'Services' && (
+          <table className="resource-tabs__table">
+            <thead>
+              <tr>
+                <th>Namespace</th>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Cluster IP</th>
+                <th>Port(s)</th>
+                <th>Endpoints</th>
+                <th>Age</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Services.map(s => {
+                const ep = Endpoints.find(
+                  e => e.metadata.name === s.metadata.name && e.metadata.namespace === s.metadata.namespace
+                );
+                const ips = ep?.subsets.flatMap(sub => sub.addresses.map(a => a.ip)) ?? [];
+                return (
+                  <tr key={`${s.metadata.namespace}/${s.metadata.name}`}>
+                    <td>{s.metadata.namespace}</td>
+                    <td>{s.metadata.name}</td>
+                    <td>{s.spec.type}</td>
+                    <td>{s.spec.clusterIP}</td>
+                    <td>{s.spec.ports.map(p => `${p.port}/TCP`).join(', ')}</td>
+                    <td>{ips.length > 0 ? ips.join(', ') : '—'}</td>
+                    <AgeCell timestamp={s.metadata.creationTimestamp} />
                   </tr>
                 );
               })}

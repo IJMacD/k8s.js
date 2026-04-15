@@ -42,7 +42,11 @@ export function useReplicaSetController(
                         const podName = `${name}-${crypto.randomUUID().slice(0, 5)}`;
                         dispatch(createPod(
                             podName,
-                            { image: containers[0]?.image ?? "", containerName: containers[0]?.name },
+                            {
+                                image: containers[0]?.image ?? "",
+                                containerName: containers[0]?.name,
+                                labels: rs.metadata.labels,
+                            },
                             namespace,
                             name,
                         ));
