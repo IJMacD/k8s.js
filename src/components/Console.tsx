@@ -9,7 +9,7 @@ import { useSavedState } from "../hooks/useSavedState";
 const PROMPT = '> ';
 const PROMPT_CONT = '  '; // continuation prompt, same width as PROMPT
 
-export function Console({ onCommand, onDismiss }: { onCommand: (command: string) => AsyncGenerator<string>; onDismiss?: () => void }) {
+export function Console({ onCommand }: { onCommand: (command: string) => AsyncGenerator<string>; }) {
     const [input, setInput] = useState('');
     const [output, setOutput] = useState<string[]>([
         'Welcome to k8s.js! Try a few commands to get started:',
@@ -151,19 +151,6 @@ export function Console({ onCommand, onDismiss }: { onCommand: (command: string)
 
     return (
         <div style={{ backgroundColor: '#1e1e1e', color: '#d4d4d4', fontFamily: 'monospace', fontSize: '16px', textAlign: 'left', height: '400px', display: 'flex', flexDirection: 'column', borderTop: '1px solid #333' }} onClick={handleConsoleClick}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 8px', borderBottom: '1px solid #333', flexShrink: 0 }}>
-                <span style={{ fontSize: '12px', color: '#888', userSelect: 'none' }}>TERMINAL</span>
-                {onDismiss && (
-                    <button
-                        onClick={e => { e.stopPropagation(); onDismiss(); }}
-                        style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '16px', lineHeight: 1, padding: '0 2px' }}
-                        title="Minimise terminal"
-                        aria-label="Minimise terminal"
-                    >
-                        ⌃
-                    </button>
-                )}
-            </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '5px' }} ref={outputRef}>
                 {output.map((line, index) => (
                     <div key={index} style={{ whiteSpace: 'pre-wrap' }}>{line || '\u00a0'}</div>

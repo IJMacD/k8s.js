@@ -1,6 +1,7 @@
 import { useReducer, useRef, useState } from 'react';
 import './App.css'
 import { Console } from './Console'
+import { Browser } from './Browser'
 import { reducer, type Action, type AppState } from '../store/store';
 import { command } from '../commands/command';
 import { ResourceTabs } from './ResourceTabs';
@@ -52,7 +53,7 @@ const initialState: AppState = {
 
 function App() {
   const [store, dispatch] = useReducer<AppState, [action: Action]>(reducer, initialState)
-  const [consoleOpen, setConsoleOpen] = useState(true);
+  const [bottomTab, setBottomTab] = useState<'terminal' | 'browser' | null>('terminal');
 
   useDeploymentController(store, dispatch);
   useReplicaSetController(store, dispatch);
@@ -87,19 +88,58 @@ function App() {
           CronJobs={store.CronJobs}
         />
       </div>
-      <div style={{ display: consoleOpen ? undefined : 'none' }}>
-        <Console onCommand={handleCommand} onDismiss={() => setConsoleOpen(false)} />
+      {/* Bottom panel — always mounted to preserve Console/Browser state */}
+      <div style={{ display: bottomTab !== null ? 'flex' : 'none', flexDirection: 'column', flexShrink: 0 }}>
+        {/* Tab strip */}
+        <div style={{ display: 'flex', alignItems: 'stretch', backgroundColor: '#252526', borderTop: '1px solid #333', flexShrink: 0 }}>
+          {(['terminal', 'browser'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setBottomTab(tab)}
+              style={{
+                background: 'none',
+                border: 'none',
+                borderBottom: bottomTab === tab ? '2px solid #c084fc' : '2px solid transparent',
+                color: bottomTab === tab ? '#e0e0e0' : '#888',
+                cursor: 'pointer',
+                fontFamily: 'monospace',
+                fontSize: '11px',
+                letterSpacing: '0.05em',
+                padding: '5px 16px',
+              }}
+            >
+              {tab === 'terminal' ? '⌃ TERMINAL' : '🌐 BROWSER'}
+            </button>
+          ))}
+          <div style={{ flex: 1 }} />
+          <button
+            onClick={() => setBottomTab(null)}
+            style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', padding: '0 10px', fontSize: '14px' }}
+            title="Close panel"
+          >✕</button>
+        </div>
+        {/* Panels */}
+        <div style={{ display: bottomTab === 'terminal' ? undefined : 'none' }}>
+          <Console onCommand={handleCommand} />
+        </div>
+        <div style={{ display: bottomTab === 'browser' ? undefined : 'none' }}>
+          <Browser state={store} />
+        </div>
       </div>
-      {!consoleOpen && (
+      {/* Minimised bar */}
+      {bottomTab === null && (
         <div style={{ backgroundColor: '#1e1e1e', borderTop: '1px solid #333', display: 'flex', alignItems: 'center', padding: '0 8px', height: '28px', flexShrink: 0 }}>
           <button
-            onClick={() => setConsoleOpen(true)}
-            style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontFamily: 'monospace', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
-            title="Restore terminal"
-            aria-label="Restore terminal"
+            onClick={() => setBottomTab('terminal')}
+            style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontFamily: 'monospace', fontSize: '11px', padding: '0 12px 0 0' }}
           >
-            <span style={{ transform: 'rotate(180deg)', display: 'inline-block', lineHeight: 1 }}>⌃</span>
-            TERMINAL
+            <span style={{ transform: 'rotate(180deg)', display: 'inline-block', lineHeight: 1 }}>⌃</span> TERMINAL
+          </button>
+          <button
+            onClick={() => setBottomTab('browser')}
+            style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontFamily: 'monospace', fontSize: '11px', padding: '0 8px' }}
+          >
+            🌐 BROWSER
           </button>
         </div>
       )}

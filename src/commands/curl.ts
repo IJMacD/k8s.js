@@ -48,17 +48,14 @@ interface CurlFlags {
     include: boolean; // -i / --include: show response headers
     head: boolean;    // -I / --head: HEAD request only
     verbose: boolean; // -v
-    url: string;
-    port: number;     // always resolved: from URL, --port flag, or scheme default (80/443)
-    path: string;
+    rawUrl: string;
 }
 
 function parseArgs(rawArgs: string[]): CurlFlags {
     let include = false;
     let head = false;
     let verbose = false;
-    let urlArg = "";
-    let portOverride: number | null = null;
+    let rawUrl = "";
 
     for (let i = 0; i < rawArgs.length; i++) {
         const a = rawArgs[i];
@@ -73,15 +70,17 @@ function parseArgs(rawArgs: string[]): CurlFlags {
             continue;
         }
         if (a.startsWith("-")) continue; // unknown flag
-        if (!urlArg) urlArg = a;
+        if (!rawUrl) rawUrl = a;
     }
 
-    // Detect scheme and strip protocol prefix
-    const scheme = urlArg.match(/^(https?):\/\//)?.[1] ?? "http";
-    const schemeDefaultPort = scheme === "https" ? 443 : 80;
-    let rest = urlArg.replace(/^https?:\/\//, "");
+    return { include, head, verbose, rawUrl };
+}
 
-    // Extract path
+function parseUrl(rawUrl: string): { host: string; port: number; path: string } {
+    const scheme = rawUrl.match(/^(https?):\/\//)?.[1] ?? "http";
+    const schemeDefaultPort = scheme === "https" ? 443 : 80;
+    let rest = rawUrl.replace(/^https?:\/\//, "");
+
     const slashIdx = rest.indexOf("/");
     let path = "/";
     if (slashIdx !== -1) {
@@ -89,18 +88,18 @@ function parseArgs(rawArgs: string[]): CurlFlags {
         rest = rest.slice(0, slashIdx);
     }
 
-    // Extract port from host:port
     const colonIdx = rest.lastIndexOf(":");
     let host = rest;
+    let port = schemeDefaultPort;
     if (colonIdx !== -1 && !rest.includes("]")) {
         const maybePort = parseInt(rest.slice(colonIdx + 1), 10);
         if (!isNaN(maybePort)) {
-            portOverride = portOverride ?? maybePort;
+            port = maybePort;
             host = rest.slice(0, colonIdx);
         }
     }
 
-    return { include, head, verbose, url: host, port: portOverride ?? schemeDefaultPort, path };
+    return { host, port, path };
 }
 
 // ---------------------------------------------------------------------------
@@ -112,7 +111,8 @@ interface Target {
     image: string;
     phase: string;
     port: number;
-    resolvedIP: string;
+    dialIP: string;     // IP the client connects to (ClusterIP for services, pod IP for direct)
+    resolvedIP: string; // pod endpoint IP
     viaService?: string;
 }
 
@@ -144,6 +144,7 @@ function resolve(host: string, portHint: number, state: AppState): ResolveResult
                 image,
                 phase: podByIP.status.phase,
                 port: portHint,
+                dialIP: host,
                 resolvedIP: host,
             },
         };
@@ -212,23 +213,80 @@ function resolveViaService(svcName: string, svcNs: string, portHint: number, sta
     }
 
     return {
-        ok: true,
-        target: {
-            podName: pod.metadata.name,
-            podNamespace: pod.metadata.namespace,
-            image: pod.spec.containers[0]?.image ?? "",
-            phase: pod.status.phase,
-            port: svcPort.targetPort,
-            resolvedIP: epAddress.ip,
-            viaService: svcName,
-        },
-    };
+            ok: true,
+            target: {
+                podName: pod.metadata.name,
+                podNamespace: pod.metadata.namespace,
+                image: pod.spec.containers[0]?.image ?? "",
+                phase: pod.status.phase,
+                port: svcPort.targetPort,
+                dialIP: svc.spec.clusterIP,
+                resolvedIP: epAddress.ip,
+                viaService: svcName,
+            },
+        };
 }
 
 // ---------------------------------------------------------------------------
-// Build the simulated HTTP response output
+// Simulated fetch — used by the Browser pane (returns structured data)
 // ---------------------------------------------------------------------------
-function buildResponse(target: Target, flags: CurlFlags): string {
+export interface SimResponse {
+    ok: true;
+    status: number;
+    statusText: string;
+    headers: Record<string, string>;
+    body: string;
+    host: string;
+    dialPort: number;
+    path: string;
+    dialIP: string;     // IP the client connects to
+    resolvedIP: string; // pod endpoint IP
+    podName: string;
+    viaService?: string;
+}
+export interface SimError {
+    ok: false;
+    kind: 'not_found' | 'port_refused' | 'pod_not_ready' | 'not_http';
+    error: string;
+    host: string;
+    port: number;
+    podName?: string;
+    podPhase?: string;
+    podImage?: string;
+}
+
+export function clusterFetch(rawUrl: string, state: AppState): SimResponse | SimError {
+    const { host, port, path } = parseUrl(rawUrl);
+
+    if (!host) return { ok: false, kind: 'not_found', host: '', port: 0, error: "No URL provided" };
+
+    // Escape HTML special characters in any value that comes from user input
+    // before interpolating into the HTML body (which is rendered via dangerouslySetInnerHTML).
+    const esc = (s: string) =>
+        s.replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+
+    const result = resolve(host, port, state);
+
+    if (!result.ok) {
+        if (result.reason === "port_refused") {
+            return { ok: false, kind: 'port_refused', host, port: result.port, error: `Failed to connect to ${host} port ${result.port}: Connection refused` };
+        }
+        return { ok: false, kind: 'not_found', host, port, error: `Could not resolve host: ${host}` };
+    }
+
+    const { target } = result;
+
+    if (target.phase !== "Running") {
+        return { ok: false, kind: 'pod_not_ready', host, port: target.port, podName: target.podName, podPhase: target.phase, error: `Connection refused (Pod ${target.podName} is ${target.phase})` };
+    }
+    if (!isHttpServer(target.image)) {
+        return { ok: false, kind: 'not_http', host, port: target.port, podName: target.podName, podImage: target.image, error: `Connection refused (Pod ${target.podName} image "${target.image}" is not an HTTP server)` };
+    }
+
     const date = new Date().toUTCString();
     const server = (() => {
         const base = target.image.split(":")[0].split("/").pop() ?? "server";
@@ -239,57 +297,34 @@ function buildResponse(target: Target, flags: CurlFlags): string {
         return base;
     })();
 
-    const statusLine = "HTTP/1.1 200 OK";
-    const headers = [
-        `Date: ${date}`,
-        `Server: ${server}`,
-        `Content-Type: text/html`,
-        `Connection: keep-alive`,
-    ];
-
     const body = [
         `<!DOCTYPE html>`,
-        `<html><head><title>Welcome</title></head>`,
+        `<html><head><title>Welcome to ${esc(host)}</title></head>`,
         `<body>`,
-        `<h1>Hello from ${target.podName}</h1>`,
-        `<p>Pod IP: ${target.resolvedIP} | Port: ${target.port} | Path: ${flags.path}</p>`,
+        `<h1>Hello from ${esc(target.podName)}</h1>`,
+        `<p>Pod IP: ${esc(target.resolvedIP)} | Port: ${target.port} | Path: ${esc(path)}</p>`,
         `</body></html>`,
     ].join("\n");
 
-    const lines: string[] = [];
-
-    if (flags.verbose) {
-        // flags.port is what the client dialed (service port); target.port is the pod's receive port (targetPort).
-        lines.push(`* Trying ${target.resolvedIP}:${flags.port}...`);
-        lines.push(`* Connected to ${flags.url} (${target.resolvedIP}) port ${flags.port}`);
-        if (flags.head) {
-            lines.push(`> HEAD ${flags.path} HTTP/1.1`);
-        } else {
-            lines.push(`> GET ${flags.path} HTTP/1.1`);
-        }
-        lines.push(`> Host: ${flags.url}`);
-        lines.push(`> Accept: */*`);
-        lines.push(`>`);
-        lines.push(`< ${statusLine}`);
-        headers.forEach(h => lines.push(`< ${h}`));
-        lines.push(`<`);
-    }
-
-    if (flags.include) {
-        lines.push(statusLine);
-        lines.push(...headers);
-        lines.push("");
-    }
-
-    if (!flags.head) {
-        lines.push(body);
-    }
-
-    if (flags.verbose) {
-        lines.push(`* Connection #0 to host ${flags.url} left intact`);
-    }
-
-    return lines.join("\n");
+    return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        headers: {
+            "Date": date,
+            "Server": server,
+            "Content-Type": "text/html",
+            "Connection": "keep-alive",
+        },
+        body,
+        host,
+        dialPort: port,
+        path,
+        dialIP: target.dialIP,
+        resolvedIP: target.resolvedIP,
+        podName: target.podName,
+        viaService: target.viaService,
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -298,7 +333,7 @@ function buildResponse(target: Target, flags: CurlFlags): string {
 export function curl(rawArgs: string[], state: AppState): string {
     const flags = parseArgs(rawArgs);
 
-    if (!flags.url) {
+    if (!flags.rawUrl) {
         return [
             `curl: try 'curl --help' for more information`,
             `Usage: curl [options] <url>`,
@@ -307,24 +342,44 @@ export function curl(rawArgs: string[], state: AppState): string {
         ].join("\n");
     }
 
-    const result = resolve(flags.url, flags.port, state);
+    const fetched = clusterFetch(flags.rawUrl, state);
 
-    if (!result.ok) {
-        if (result.reason === "port_refused") {
-            return `curl: (7) Failed to connect to ${flags.url} port ${result.port} after 0 ms: Connection refused`;
-        }
-        return `curl: (6) Could not resolve host: ${flags.url}`;
+    if (!fetched.ok) {
+        const { kind, host, port, podName, podPhase, podImage } = fetched;
+        if (kind === "not_found") return `curl: (6) Could not resolve host: ${host}`;
+        const connRefused = `curl: (7) Failed to connect to ${host} port ${port} after 0 ms: Connection refused`;
+        if (kind === "port_refused") return connRefused;
+        if (kind === "pod_not_ready") return `${connRefused}\n(Pod ${podName} is ${podPhase})`;
+        return `${connRefused}\n(Pod ${podName} image "${podImage}" is not an HTTP server)`;
     }
 
-    const { target } = result;
+    const { host, dialPort, path } = fetched;
+    const statusLine = `HTTP/1.1 ${fetched.status} ${fetched.statusText}`;
+    const hdrs = Object.entries(fetched.headers).map(([k, v]) => `${k}: ${v}`);
+    const lines: string[] = [];
 
-    if (target.phase !== "Running") {
-        return `curl: (7) Failed to connect to ${flags.url} port ${target.port} after 0 ms: Connection refused\n(Pod ${target.podName} is ${target.phase})`;
+    if (flags.verbose) {
+        lines.push(`* Trying ${fetched.dialIP}:${dialPort}...`);
+        lines.push(`* Connected to ${host} (${fetched.dialIP}) port ${dialPort}`);
+        lines.push(`> ${flags.head ? "HEAD" : "GET"} ${path} HTTP/1.1`);
+        lines.push(`> Host: ${host}`);
+        lines.push(`> Accept: */*`);
+        lines.push(`>`);
+        lines.push(`< ${statusLine}`);
+        hdrs.forEach(h => lines.push(`< ${h}`));
+        lines.push(`<`);
+    }
+    if (flags.include) {
+        lines.push(statusLine);
+        lines.push(...hdrs);
+        lines.push("");
+    }
+    if (!flags.head) {
+        lines.push(fetched.body);
+    }
+    if (flags.verbose) {
+        lines.push(`* Connection #0 to host ${host} left intact`);
     }
 
-    if (!isHttpServer(target.image)) {
-        return `curl: (7) Failed to connect to ${flags.url} port ${target.port} after 0 ms: Connection refused\n(Pod ${target.podName} image "${target.image}" is not an HTTP server)`;
-    }
-
-    return buildResponse(target, flags);
+    return lines.join("\n");
 }
