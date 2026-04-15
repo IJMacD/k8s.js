@@ -57,7 +57,7 @@ export async function* command(
             yield new Date().toString();
         }
     } else if (command === "ping") {
-        yield ping(args, getState());
+        yield* ping(args, getState());
     } else if (command === "curl") {
         yield curl(args, getState());
     } else if (command === "kubectl") {
