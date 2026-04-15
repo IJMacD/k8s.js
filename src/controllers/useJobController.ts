@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { ActionDispatch } from "react";
-import type { AppState, Action } from "./store";
-import { createPod, updateJobStatus } from "./store";
+import type { AppState, Action } from "../store/store";
+import { createPod, updateJobStatus } from "../store/store";
 
 const RECONCILE_DELAY_MS = 1_000;
 

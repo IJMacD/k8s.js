@@ -1,17 +1,17 @@
 import { useReducer, useState } from 'react';
 import './App.css'
 import { Console } from './Console'
-import { reducer, type Action, type AppState } from './store';
-import { command } from './command';
+import { reducer, type Action, type AppState } from '../store/store';
+import { command } from '../commands/command';
 import { ResourceTabs } from './ResourceTabs';
-import { useDeploymentController } from './useDeploymentController';
-import { useReplicaSetController } from './useReplicaSetController';
-import { useKubelet } from './useKubelet';
-import { useStatusController } from './useStatusController';
-import { useEndpointsController } from './useEndpointsController';
-import { useScheduler } from './useScheduler';
-import { useJobController } from './useJobController';
-import { useCronJobController } from './useCronJobController';
+import { useDeploymentController } from '../controllers/useDeploymentController';
+import { useReplicaSetController } from '../controllers/useReplicaSetController';
+import { useKubelet } from '../controllers/useKubelet';
+import { useStatusController } from '../controllers/useStatusController';
+import { useEndpointsController } from '../controllers/useEndpointsController';
+import { useScheduler } from '../controllers/useScheduler';
+import { useJobController } from '../controllers/useJobController';
+import { useCronJobController } from '../controllers/useCronJobController';
 const now = new Date().toISOString();
 function makeNode(name: string, internalIP: string, podCIDR: string) {
   return {

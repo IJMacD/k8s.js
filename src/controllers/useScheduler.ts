@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { ActionDispatch } from "react";
-import type { AppState, Action } from "./store";
-import { bindPodToNode } from "./store";
+import type { AppState, Action } from "../store/store";
+import { bindPodToNode } from "../store/store";
 
 const SCHEDULE_DELAY_MS = 500;
 

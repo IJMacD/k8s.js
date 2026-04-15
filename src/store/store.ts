@@ -1,9 +1,9 @@
-import type { Deployment } from "./types/apps/v1/Deployment";
-import type { Pod } from "./types/v1/Pod";
-import type { ReplicaSet } from "./types/apps/v1/ReplicaSet";
-import type { Service, Endpoints } from "./types/v1/Service";
-import type { KubeNode } from "./types/v1/Node";
-import type { Job, CronJob } from "./types/batch/v1/Job";
+import type { Deployment } from "../types/apps/v1/Deployment";
+import type { Pod } from "../types/v1/Pod";
+import type { ReplicaSet } from "../types/apps/v1/ReplicaSet";
+import type { Service, Endpoints } from "../types/v1/Service";
+import type { KubeNode } from "../types/v1/Node";
+import type { Job, CronJob } from "../types/batch/v1/Job";
 
 export interface AppState {
     Deployments: Deployment[];
@@ -96,7 +96,7 @@ export interface UpdateJobStatusAction {
     payload: {
         name: string;
         namespace: string;
-        patch: Partial<import("./types/batch/v1/Job").JobStatus>;
+        patch: Partial<import("../types/batch/v1/Job").JobStatus>;
     };
 }
 
@@ -119,7 +119,7 @@ export interface UpdateCronJobStatusAction {
     payload: {
         name: string;
         namespace: string;
-        patch: Partial<import("./types/batch/v1/Job").CronJobStatus>;
+        patch: Partial<import("../types/batch/v1/Job").CronJobStatus>;
     };
 }
 
@@ -131,7 +131,7 @@ export interface CreateServiceAction {
         selector: Record<string, string>;
         ports: Array<{ port: number; targetPort: number; protocol?: "TCP" | "UDP" }>;
         clusterIP: string;
-        serviceType: import("./types/v1/Service").ServiceType;
+        serviceType: import("../types/v1/Service").ServiceType;
     };
 }
 
@@ -145,10 +145,10 @@ export function createService(
 
 export interface UpdateEndpointsAction {
     type: typeof UpdateEndpointsType;
-    payload: import("./types/v1/Service").Endpoints;
+    payload: import("../types/v1/Service").Endpoints;
 }
 
-export function updateEndpoints(endpoints: import("./types/v1/Service").Endpoints): UpdateEndpointsAction {
+export function updateEndpoints(endpoints: import("../types/v1/Service").Endpoints): UpdateEndpointsAction {
     return { type: UpdateEndpointsType, payload: endpoints };
 }
 
@@ -171,12 +171,12 @@ export function createNode(
 
 export interface UpdateNodeSpecAction {
     type: typeof UpdateNodeSpecType;
-    payload: { name: string; patch: Partial<import("./types/v1/Node").NodeSpec> };
+    payload: { name: string; patch: Partial<import("../types/v1/Node").NodeSpec> };
 }
 
 export function updateNodeSpec(
     name: string,
-    patch: Partial<import("./types/v1/Node").NodeSpec>,
+    patch: Partial<import("../types/v1/Node").NodeSpec>,
 ): UpdateNodeSpecAction {
     return { type: UpdateNodeSpecType, payload: { name, patch } };
 }
@@ -253,7 +253,7 @@ export function createJob(
 export function updateJobStatus(
     name: string,
     namespace: string,
-    patch: Partial<import("./types/batch/v1/Job").JobStatus>,
+    patch: Partial<import("../types/batch/v1/Job").JobStatus>,
 ): UpdateJobStatusAction {
     return { type: UpdateJobStatusType, payload: { name, namespace, patch } };
 }
@@ -281,7 +281,7 @@ export function createCronJob(
 export function updateCronJobStatus(
     name: string,
     namespace: string,
-    patch: Partial<import("./types/batch/v1/Job").CronJobStatus>,
+    patch: Partial<import("../types/batch/v1/Job").CronJobStatus>,
 ): UpdateCronJobStatusAction {
     return { type: UpdateCronJobStatusType, payload: { name, namespace, patch } };
 }
@@ -317,14 +317,14 @@ export interface UpdatePodStatusAction {
     payload: {
         name: string;
         namespace: string;
-        patch: Partial<import("./types/v1/Pod").PodStatus>;
+        patch: Partial<import("../types/v1/Pod").PodStatus>;
     };
 }
 
 export function updatePodStatus(
     name: string,
     namespace: string,
-    patch: Partial<import("./types/v1/Pod").PodStatus>,
+    patch: Partial<import("../types/v1/Pod").PodStatus>,
 ): UpdatePodStatusAction {
     return { type: UpdatePodStatusType, payload: { name, namespace, patch } };
 }

@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { ActionDispatch } from "react";
-import type { AppState, Action } from "./store";
-import { createReplicaSet, scaleReplicaSet } from "./store";
+import type { AppState, Action } from "../store/store";
+import { createReplicaSet, scaleReplicaSet } from "../store/store";
 
 /**
  * Computes a stable 7-char hex hash of a pod template's containers,

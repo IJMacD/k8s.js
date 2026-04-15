@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { AppState } from './store';
+import type { AppState } from '../store/store';
 import './ResourceTabs.css';
 
 function age(timestamp: string): string {

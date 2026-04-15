@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { ActionDispatch } from "react";
-import type { AppState, Action } from "./store";
-import { createPod, deletePod } from "./store";
+import type { AppState, Action } from "../store/store";
+import { createPod, deletePod } from "../store/store";
 
 /** Simulated reconciliation delay in milliseconds */
 const RECONCILE_DELAY_MS = 2_000;

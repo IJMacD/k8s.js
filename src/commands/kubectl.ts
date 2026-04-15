@@ -1,152 +1,5 @@
 import type { ActionDispatch } from "react";
-import { createDeployment, createPod, scaleDeployment, setDeploymentImage, createService, updateNodeSpec, deletePod, createJob, createCronJob, type Action, type AppState } from "./store";
-
-// Splits a command line into tokens, honouring single and double quotes so
-// that values containing spaces (e.g. --schedule='*/1 * * * *') are kept
-// together as one token. Surrounding quotes are stripped from each token.
-function tokenize(input: string): string[] {
-    const tokens: string[] = [];
-    let current = "";
-    let quote: "'" | '"' | null = null;
-    for (let i = 0; i < input.length; i++) {
-        const ch = input[i];
-        if (quote) {
-            if (ch === quote) {
-                quote = null;
-            } else {
-                current += ch;
-            }
-        } else if (ch === "'" || ch === '"') {
-            quote = ch;
-        } else if (ch === " ") {
-            if (current.length > 0) {
-                tokens.push(current);
-                current = "";
-            }
-        } else {
-            current += ch;
-        }
-    }
-    if (current.length > 0) tokens.push(current);
-    return tokens;
-}
-
-export function command(
-    inputLine: string,
-    dispatch: ActionDispatch<[action: Action]>,
-    state: AppState,
-): Promise<string> {
-    return new Promise((resolve) => {
-        const tokens = tokenize(inputLine.trim());
-        // Lowercase only the command verb, not flag values (preserves cron schedules, images, etc.)
-        const command = (tokens[0] ?? "").toLowerCase();
-        const args = tokens.slice(1);
-
-        if (command === "") {
-            resolve("");
-            return;
-        } else if (command === "help") {
-            resolve("Available commands: help, echo [message], date");
-            return;
-        } else if (command === "echo") {
-            const message = args.join(" ");
-            resolve(message);
-            return;
-        } else if (command === "date") {
-            if (args[0] === "--iso") {
-                resolve(new Date().toISOString());
-                return;
-            }
-            resolve(new Date().toString());
-            return;
-        } else if (command === "ping") {
-            const target = args[0];
-            if (!target) {
-                resolve("ping: missing host/IP");
-                return;
-            }
-
-            // Resolve DNS name → service clusterIP.
-            // Accepted forms (default namespace assumed when omitted):
-            //   <name>
-            //   <name>.<namespace>
-            //   <name>.<namespace>.svc
-            //   <name>.<namespace>.svc.cluster.local
-            const resolveToSvc = (host: string) => {
-                const parts = host.split(".");
-                // Reject anything with a suffix that isn't a valid k8s DNS form
-                if (parts.length === 3 && parts[2] !== "svc") return undefined;
-                if (parts.length === 5 && (parts[2] !== "svc" || parts[3] !== "cluster" || parts[4] !== "local")) return undefined;
-                if (parts.length > 5 || (parts.length === 4)) return undefined;
-                const svcName = parts[0];
-                const ns = parts[1] ?? "default";
-                return state.Services.find(
-                    s => s.metadata.name === svcName &&
-                        (parts.length === 1 ? true : s.metadata.namespace === ns),
-                );
-            };
-
-            const isIP = /^\d+\.\d+\.\d+\.\d+$/.test(target);
-
-            // Resolve the target to a clusterIP (or keep as-is for pod IPs)
-            let resolvedIP = target;
-            const lookedUpSvc = isIP
-                ? state.Services.find(s => s.spec.clusterIP === target)
-                : resolveToSvc(target);
-
-            if (!isIP && lookedUpSvc) {
-                resolvedIP = lookedUpSvc.spec.clusterIP;
-            }
-
-            const pod = state.Pods.find(p => p.status.podIP === resolvedIP);
-            if (!pod) {
-                if (lookedUpSvc) {
-                    // Service DNS / clusterIP path
-                    const ep = state.Endpoints.find(
-                        e => e.metadata.name === lookedUpSvc!.metadata.name &&
-                             e.metadata.namespace === lookedUpSvc!.metadata.namespace,
-                    );
-                    const addresses = ep?.subsets.flatMap(s => s.addresses) ?? [];
-                    if (addresses.length === 0) {
-                        resolve(`ping: connect to host ${target}: Connection refused`);
-                        return;
-                    }
-                    const ms = () => (0.03 + Math.random() * 0.04).toFixed(3);
-                    resolve(
-                        `PING ${target} (${resolvedIP}): 56 data bytes\n` +
-                        `64 bytes from ${resolvedIP}: icmp_seq=0 ttl=64 time=${ms()} ms\n` +
-                        `64 bytes from ${resolvedIP}: icmp_seq=1 ttl=64 time=${ms()} ms\n` +
-                        `64 bytes from ${resolvedIP}: icmp_seq=2 ttl=64 time=${ms()} ms\n` +
-                        `\n--- ${target} ping statistics ---\n` +
-                        `3 packets transmitted, 3 packets received, 0.0% packet loss`
-                    );
-                    return;
-                }
-                resolve(`ping: cannot resolve ${target}: Name or service not known`);
-                return;
-            }
-            if (pod.status.phase !== "Running") {
-                resolve(`ping: connect to host ${target}: Connection refused`);
-                return;
-            }
-            const ms = () => (0.03 + Math.random() * 0.04).toFixed(3);
-            resolve(
-                `PING ${target} (${resolvedIP}): 56 data bytes\n` +
-                `64 bytes from ${resolvedIP}: icmp_seq=0 ttl=64 time=${ms()} ms\n` +
-                `64 bytes from ${resolvedIP}: icmp_seq=1 ttl=64 time=${ms()} ms\n` +
-                `64 bytes from ${resolvedIP}: icmp_seq=2 ttl=64 time=${ms()} ms\n` +
-                `\n--- ${target} ping statistics ---\n` +
-                `3 packets transmitted, 3 packets received, 0.0% packet loss`
-            );
-            return;
-        } else if (command === "kubectl") {
-            resolve(kubectl(args, dispatch, state));
-        } else {
-            resolve(`Unknown command: ${command}`);
-            return;
-        }
-    });
-}
+import { createCronJob, createDeployment, createJob, createPod, createService, deletePod, scaleDeployment, setDeploymentImage, updateNodeSpec, type Action, type AppState } from "../store/store";
 
 /**
  * Strips -n / --namespace flags from kubectl args and returns the clean
@@ -168,7 +21,7 @@ function parseKubectlArgs(rawArgs: string[]): { namespace: string; args: string[
     return { namespace, args };
 }
 
-function kubectl(
+export function kubectl(
     rawArgs: string[],
     dispatch: ActionDispatch<[action: Action]>,
     state: AppState,
@@ -322,7 +175,7 @@ function kubectl(
         const targetPort = targetPortFlag ? parseInt(targetPortFlag.slice("--target-port=".length), 10) : port;
 
         const typeFlag = args.find(a => a.startsWith("--type="));
-        const serviceType = (typeFlag?.slice("--type=".length) ?? "ClusterIP") as import("./types/v1/Service").ServiceType;
+        const serviceType = (typeFlag?.slice("--type=".length) ?? "ClusterIP") as import("../types/v1/Service").ServiceType;
 
         const svcNameFlag = args.find(a => a.startsWith("--name="));
         const svcName = svcNameFlag?.slice("--name=".length) ?? name;

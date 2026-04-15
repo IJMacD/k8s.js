@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { ActionDispatch } from "react";
-import type { AppState, Action } from "./store";
-import { updateReplicaSetStatus, updateDeploymentStatus } from "./store";
+import type { AppState, Action } from "../store/store";
+import { updateReplicaSetStatus, updateDeploymentStatus } from "../store/store";
 
 /**
  * Watches pods and propagates ready/available counts up to owning

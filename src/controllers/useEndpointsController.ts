@@ -1,8 +1,8 @@
 import { useEffect } from "react";
 import type { ActionDispatch } from "react";
-import type { AppState, Action } from "./store";
-import { updateEndpoints } from "./store";
-import type { EndpointSubset } from "./types/v1/Service";
+import type { AppState, Action } from "../store/store";
+import { updateEndpoints } from "../store/store";
+import type { EndpointSubset } from "../types/v1/Service";
 
 /**
  * Simulates the Kubernetes endpoints controller.

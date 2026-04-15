@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 import type { ActionDispatch } from "react";
-import type { PodCondition } from "./types/v1/Pod";
-import type { AppState, Action } from "./store";
-import { updatePodStatus } from "./store";
+import type { PodCondition } from "../types/v1/Pod";
+import type { AppState, Action } from "../store/store";
+import { updatePodStatus } from "../store/store";
 
 /**
  * Simulates the Kubernetes kubelet.

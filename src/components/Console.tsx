@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { useSavedState } from "./useSavedState";
+import { useSavedState } from "../hooks/useSavedState";
 
 const PROMPT = '> ';
 

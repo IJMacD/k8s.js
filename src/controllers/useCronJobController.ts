@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { ActionDispatch } from "react";
-import type { AppState, Action } from "./store";
-import { createJob, updateCronJobStatus } from "./store";
+import type { AppState, Action } from "../store/store";
+import { createJob, updateCronJobStatus } from "../store/store";
 
 // ---------------------------------------------------------------------------
 // Minimal cron parser — supports *, */n, and single numeric values per field.
