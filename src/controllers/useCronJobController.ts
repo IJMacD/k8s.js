@@ -109,10 +109,10 @@ export function useCronJobController(
                         createJob(
                             jobName,
                             {
-                                image: jobSpec.template.spec.containers[0]?.image ?? "",
                                 completions: jobSpec.completions,
                                 parallelism: jobSpec.parallelism,
                                 backoffLimit: jobSpec.backoffLimit,
+                                template: jobSpec.template,
                             },
                             namespace,
                             { kind: "CronJob", apiVersion: "batch/v1", name, uid: cj.metadata.uid },

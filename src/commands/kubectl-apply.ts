@@ -1,6 +1,6 @@
 import { loadAll } from "js-yaml";
 import type { ActionDispatch } from "react";
-import type { Container } from "../types/v1/Pod";
+import type { Container, PodTemplateSpec } from "../types/v1/Pod";
 import {
     createCronJob,
     createDaemonSet,
@@ -46,6 +46,31 @@ function parseContainers(podSpec: unknown): Container[] | undefined {
     }));
 }
 
+/** Build a PodTemplateSpec from a raw YAML template object */
+function parseTemplate(rawTemplate: unknown, defaultName: string, defaultNamespace: string): PodTemplateSpec {
+    const tmpl = rawTemplate as Record<string, unknown> | undefined;
+    const rawMeta = tmpl?.metadata as Record<string, unknown> | undefined;
+    const labels = (rawMeta?.labels ?? {}) as Record<string, string>;
+    const rawSpec = tmpl?.spec as Record<string, unknown> | undefined;
+    const containers = parseContainers(rawSpec) ?? [];
+    const restartPolicy = typeof rawSpec?.restartPolicy === "string"
+        ? rawSpec.restartPolicy as "Always" | "OnFailure" | "Never"
+        : undefined;
+    const nodeName = typeof rawSpec?.nodeName === "string" ? rawSpec.nodeName : undefined;
+    return {
+        metadata: {
+            name: defaultName,
+            namespace: defaultNamespace,
+            ...(Object.keys(labels).length > 0 ? { labels } : {}),
+        },
+        spec: {
+            containers,
+            ...(restartPolicy ? { restartPolicy } : {}),
+            ...(nodeName ? { nodeName } : {}),
+        },
+    };
+}
+
 export async function* kubectlApply(
     args: string[],
     namespace: string,
@@ -84,13 +109,12 @@ export async function* kubectlApply(
 
         switch (kind) {
             case "deployment": {
-                const podSpec = (spec?.template as Record<string, unknown> | undefined)?.spec;
-                const containers = parseContainers(podSpec);
-                const image = containers?.[0]?.image ?? "";
+                const template = parseTemplate(spec?.template, name, docNs);
+                const image = template.spec.containers[0]?.image ?? "";
                 const replicas = typeof spec?.replicas === "number" ? spec.replicas : 1;
                 if (!state.Deployments.some(d => d.metadata.name === name && d.metadata.namespace === docNs)) {
                     if (!image) throw Error(`kubectl apply: Deployment "${name}": containers[0].image is required`);
-                    dispatch(createDeployment(name, { image, replicas, containers }, docNs));
+                    dispatch(createDeployment(name, { replicas, template }, docNs));
                     yield `deployment.apps/${name} created`;
                 } else {
                     dispatch(patchResource("deployment", name, { spec }, docNs));
@@ -122,12 +146,11 @@ export async function* kubectlApply(
                 break;
             }
             case "daemonset": {
-                const podSpec = (spec?.template as Record<string, unknown> | undefined)?.spec;
-                const containers = parseContainers(podSpec);
-                const image = containers?.[0]?.image ?? "";
+                const template = parseTemplate(spec?.template, name, docNs);
+                const image = template.spec.containers[0]?.image ?? "";
                 if (!state.DaemonSets.some(d => d.metadata.name === name && d.metadata.namespace === docNs)) {
                     if (!image) throw Error(`kubectl apply: DaemonSet "${name}": containers[0].image is required`);
-                    dispatch(createDaemonSet(name, { image, containers }, docNs));
+                    dispatch(createDaemonSet(name, { template }, docNs));
                     yield `daemonset.apps/${name} created`;
                 } else {
                     dispatch(patchResource("daemonset", name, { spec }, docNs));
@@ -136,14 +159,13 @@ export async function* kubectlApply(
                 break;
             }
             case "statefulset": {
-                const podSpec = (spec?.template as Record<string, unknown> | undefined)?.spec;
-                const containers = parseContainers(podSpec);
-                const image = containers?.[0]?.image ?? "";
+                const template = parseTemplate(spec?.template, name, docNs);
+                const image = template.spec.containers[0]?.image ?? "";
                 const replicas = typeof spec?.replicas === "number" ? spec.replicas : 1;
                 const serviceName = typeof spec?.serviceName === "string" ? spec.serviceName : name;
                 if (!state.StatefulSets.some(s => s.metadata.name === name && s.metadata.namespace === docNs)) {
                     if (!image) throw Error(`kubectl apply: StatefulSet "${name}": containers[0].image is required`);
-                    dispatch(createStatefulSet(name, { image, replicas, serviceName, containers }, docNs));
+                    dispatch(createStatefulSet(name, { replicas, serviceName, template }, docNs));
                     yield `statefulset.apps/${name} created`;
                 } else {
                     dispatch(patchResource("statefulset", name, { spec }, docNs));
@@ -152,15 +174,14 @@ export async function* kubectlApply(
                 break;
             }
             case "job": {
-                const podSpec = (spec?.template as Record<string, unknown> | undefined)?.spec;
-                const containers = parseContainers(podSpec);
-                const image = containers?.[0]?.image ?? "";
+                const template = parseTemplate(spec?.template, name, docNs);
+                const image = template.spec.containers[0]?.image ?? "";
                 const completions = typeof spec?.completions === "number" ? spec.completions : 1;
                 const parallelism = typeof spec?.parallelism === "number" ? spec.parallelism : 1;
                 const backoffLimit = typeof spec?.backoffLimit === "number" ? spec.backoffLimit : 6;
                 if (!state.Jobs.some(j => j.metadata.name === name && j.metadata.namespace === docNs)) {
                     if (!image) throw Error(`kubectl apply: Job "${name}": containers[0].image is required`);
-                    dispatch(createJob(name, { image, completions, parallelism, backoffLimit, containers }, docNs));
+                    dispatch(createJob(name, { completions, parallelism, backoffLimit, template }, docNs));
                     yield `job.batch/${name} created`;
                 } else {
                     dispatch(patchResource("job", name, { spec }, docNs));
@@ -170,16 +191,16 @@ export async function* kubectlApply(
             }
             case "cronjob": {
                 const jobSpec = (spec?.jobTemplate as Record<string, unknown> | undefined)?.spec as Record<string, unknown> | undefined;
-                const podSpec = (jobSpec?.template as Record<string, unknown> | undefined)?.spec;
-                const containers = parseContainers(podSpec);
-                const image = containers?.[0]?.image ?? "";
+                const template = parseTemplate(jobSpec?.template, name, docNs);
+                const image = template.spec.containers[0]?.image ?? "";
                 const schedule = typeof spec?.schedule === "string" ? spec.schedule : "";
                 const completions = typeof jobSpec?.completions === "number" ? jobSpec.completions : 1;
                 const parallelism = typeof jobSpec?.parallelism === "number" ? jobSpec.parallelism : 1;
+                const backoffLimit = typeof jobSpec?.backoffLimit === "number" ? jobSpec.backoffLimit : 6;
                 if (!state.CronJobs.some(c => c.metadata.name === name && c.metadata.namespace === docNs)) {
                     if (!image) throw Error(`kubectl apply: CronJob "${name}": jobTemplate containers[0].image is required`);
                     if (!schedule) throw Error(`kubectl apply: CronJob "${name}": spec.schedule is required`);
-                    dispatch(createCronJob(name, { image, schedule, completions, parallelism, containers }, docNs));
+                    dispatch(createCronJob(name, { schedule, completions, parallelism, backoffLimit, template }, docNs));
                     yield `cronjob.batch/${name} created`;
                 } else {
                     dispatch(patchResource("cronjob", name, { spec }, docNs));

@@ -40,7 +40,6 @@ export function useDaemonSetController(
 
         for (const ds of DaemonSets) {
             const { name, namespace, uid } = ds.metadata;
-            const containers = ds.spec.template.spec.containers;
 
             const ownedPods = Pods.filter(
                 p =>
@@ -58,11 +57,8 @@ export function useDaemonSetController(
                         dispatch(createPod(
                             podName,
                             {
-                                image: containers[0]?.image ?? "",
-                                containerName: containers[0]?.name,
-                                ports: containers[0]?.ports,
-                                labels: { ...ds.metadata.labels },
-                                nodeName: node.metadata.name,
+                                metadata: { labels: { ...ds.metadata.labels } },
+                                spec: { ...ds.spec.template.spec, nodeName: node.metadata.name },
                             },
                             namespace,
                             { kind: "DaemonSet", apiVersion: "apps/v1", name, uid },

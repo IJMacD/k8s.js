@@ -41,7 +41,6 @@ export function useStatefulSetController(
             const { name, namespace, uid } = sts.metadata;
             const desired = sts.spec.replicas;
             const policy = sts.spec.podManagementPolicy ?? "OrderedReady";
-            const containers = sts.spec.template.spec.containers;
 
             // Collect only pods owned by this StatefulSet with a valid ordinal index
             const ownedPods = Pods.filter(
@@ -66,13 +65,13 @@ export function useStatefulSetController(
                 dispatch(createPod(
                     podName,
                     {
-                        image: containers[0]?.image ?? "",
-                        containerName: containers[0]?.name,
-                        ports: containers[0]?.ports,
-                        labels: {
-                            ...sts.spec.selector.matchLabels,
-                            "statefulset.kubernetes.io/pod-name": podName,
+                        metadata: {
+                            labels: {
+                                ...sts.spec.selector.matchLabels,
+                                "statefulset.kubernetes.io/pod-name": podName,
+                            },
                         },
+                        spec: sts.spec.template.spec,
                     },
                     namespace,
                     { kind: "StatefulSet", apiVersion: "apps/v1", name, uid },

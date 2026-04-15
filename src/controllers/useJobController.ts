@@ -108,7 +108,6 @@ export function useJobController(
                 completions - succeeded - active,
             );
             if (needed > 0) {
-                const containers = job.spec.template.spec.containers;
                 for (let i = 0; i < needed; i++) {
                     timers.push(
                         setTimeout(() => {
@@ -117,10 +116,8 @@ export function useJobController(
                                 createPod(
                                     podName,
                                     {
-                                        image: containers[0]?.image ?? "",
-                                        containerName: containers[0]?.name,
-                                        labels: { "job-name": name },
-                                        restartPolicy: "Never",
+                                        metadata: { labels: { "job-name": name } },
+                                        spec: { ...job.spec.template.spec, restartPolicy: "Never" },
                                     },
                                     namespace,
                                     { kind: "Job", apiVersion: "batch/v1", name, uid: job.metadata.uid },

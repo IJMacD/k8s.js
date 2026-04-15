@@ -34,7 +34,16 @@ export async function* kubectlCreate(
             });
             if (state.Pods.some(p => p.metadata.name === name && p.metadata.namespace === namespace))
                 throw Error(`Error from server (AlreadyExists): pods "${name}" already exists`);
-            dispatch(createPod(name, { image, restartPolicy, ...(env.length && { env }) }, namespace));
+            dispatch(createPod(
+                name,
+                {
+                    spec: {
+                        containers: [{ name, image, ...(env.length && { env }) }],
+                        ...(restartPolicy && { restartPolicy }),
+                    },
+                },
+                namespace,
+            ));
             yield `pod/${name} created`; return;
         } else {
             throw Error("Expecting --image");
@@ -58,10 +67,10 @@ export async function* kubectlCreate(
                 throw Error(`Error from server (AlreadyExists): jobs "${name}" already exists`);
             const s = cj.spec.jobTemplate.spec;
             dispatch(createJob(name, {
-                image: s.template.spec.containers[0]?.image ?? "",
                 completions: s.completions,
                 parallelism: s.parallelism,
                 backoffLimit: s.backoffLimit,
+                template: s.template,
             }, namespace, { kind: "CronJob", apiVersion: "batch/v1", name: cronName, uid: cj.metadata.uid }));
             yield `job.batch/${name} created`; return;
         }
@@ -76,7 +85,15 @@ export async function* kubectlCreate(
 
         if (state.Jobs.some(j => j.metadata.name === name && j.metadata.namespace === namespace))
             throw Error(`Error from server (AlreadyExists): jobs "${name}" already exists`);
-        dispatch(createJob(name, { image, completions, parallelism, backoffLimit }, namespace));
+        dispatch(createJob(name, {
+            completions,
+            parallelism,
+            backoffLimit,
+            template: {
+                metadata: { name, namespace, labels: { "job-name": name } },
+                spec: { containers: [{ name, image }], restartPolicy: "Never" },
+            },
+        }, namespace));
         yield `job.batch/${name} created`; return;
     }
     if (args[0] === "create" && args[1] === "cronjob") {
@@ -96,7 +113,15 @@ export async function* kubectlCreate(
 
         if (state.CronJobs.some(c => c.metadata.name === name && c.metadata.namespace === namespace))
             throw Error(`Error from server (AlreadyExists): cronjobs "${name}" already exists`);
-        dispatch(createCronJob(name, { image, schedule, completions, parallelism }, namespace));
+        dispatch(createCronJob(name, {
+            schedule,
+            completions,
+            parallelism,
+            template: {
+                metadata: { name, namespace, labels: { "job-name": name } },
+                spec: { containers: [{ name, image }], restartPolicy: "Never" },
+            },
+        }, namespace));
         yield `cronjob.batch/${name} created`; return;
     }
     if (args[0] === "create" && args[1] === "daemonset") {
@@ -109,7 +134,12 @@ export async function* kubectlCreate(
 
         if (state.DaemonSets.some(ds => ds.metadata.name === name && ds.metadata.namespace === namespace))
             throw Error(`Error from server (AlreadyExists): daemonsets "${name}" already exists`);
-        dispatch(createDaemonSet(name, { image }, namespace));
+        dispatch(createDaemonSet(name, {
+            template: {
+                metadata: { name, namespace, labels: { app: name } },
+                spec: { containers: [{ name, image }] },
+            },
+        }, namespace));
         yield `daemonset.apps/${name} created`; return;
     }
     if (args[0] === "create" && args[1] === "statefulset") {
@@ -125,7 +155,13 @@ export async function* kubectlCreate(
 
         if (state.StatefulSets.some(sts => sts.metadata.name === name && sts.metadata.namespace === namespace))
             throw Error(`Error from server (AlreadyExists): statefulsets "${name}" already exists`);
-        dispatch(createStatefulSet(name, { image, replicas }, namespace));
+        dispatch(createStatefulSet(name, {
+            replicas,
+            template: {
+                metadata: { name, namespace, labels: { app: name } },
+                spec: { containers: [{ name, image }] },
+            },
+        }, namespace));
         yield `statefulset.apps/${name} created`; return;
     }
     if (args[0] === "create" && args[1] === "deployment") {
@@ -141,7 +177,13 @@ export async function* kubectlCreate(
 
         if (state.Deployments.some(d => d.metadata.name === name && d.metadata.namespace === namespace))
             throw Error(`Error from server (AlreadyExists): deployments "${name}" already exists`);
-        dispatch(createDeployment(name, { image, replicas }, namespace));
+        dispatch(createDeployment(name, {
+            replicas,
+            template: {
+                metadata: { name, namespace, labels: { app: name } },
+                spec: { containers: [{ name, image }] },
+            },
+        }, namespace));
         yield `deployment.apps/${name} created`; return;
     }
     throw Error(`kubectl ${args[0]}: unknown subcommand "${args[1]}"`);

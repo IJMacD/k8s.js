@@ -90,7 +90,7 @@ export type ActionType =
 
 export interface CreateDeploymentAction {
     type: typeof CreateDeploymentType;
-    payload: { name: string; namespace: string; image: string; replicas: number; containers?: import("../types/v1/Pod").Container[] };
+    payload: { name: string; namespace: string; replicas: number; template: import("../types/v1/Pod").PodTemplateSpec };
 }
 
 export interface CreatePodAction {
@@ -98,13 +98,10 @@ export interface CreatePodAction {
     payload: {
         name: string;
         namespace: string;
-        image: string;
-        containerName?: string;
-        ports?: Array<{ name?: string; containerPort: number; protocol?: "TCP" | "UDP" }>;
-        env?: import("../types/v1/Pod").EnvRecord[];
-        labels?: Record<string, string>;
-        restartPolicy?: "Always" | "OnFailure" | "Never";
-        nodeName?: string;
+        template: {
+            metadata?: { labels?: Record<string, string>; annotations?: Record<string, string> };
+            spec: import("../types/v1/Pod").PodSpec;
+        };
         creationTimestamp: string;
         ownerReferences?: OwnerReference[];
     };
@@ -112,12 +109,12 @@ export interface CreatePodAction {
 
 export interface CreateDaemonSetAction {
     type: typeof CreateDaemonSetType;
-    payload: { name: string; namespace: string; image: string; containers?: import("../types/v1/Pod").Container[] };
+    payload: { name: string; namespace: string; template: import("../types/v1/Pod").PodTemplateSpec };
 }
 
 export interface CreateStatefulSetAction {
     type: typeof CreateStatefulSetType;
-    payload: { name: string; namespace: string; image: string; replicas: number; serviceName: string; containers?: import("../types/v1/Pod").Container[] };
+    payload: { name: string; namespace: string; replicas: number; serviceName: string; template: import("../types/v1/Pod").PodTemplateSpec };
 }
 
 export interface UpdateStatefulSetStatusAction {
@@ -143,13 +140,12 @@ export interface CreateJobAction {
     payload: {
         name: string;
         namespace: string;
-        image: string;
         completions: number;
         parallelism: number;
         backoffLimit: number;
+        template: import("../types/v1/Pod").PodTemplateSpec;
         ownerReferences?: OwnerReference[];
         creationTimestamp: string;
-        containers?: import("../types/v1/Pod").Container[];
     };
 }
 
@@ -167,13 +163,12 @@ export interface CreateCronJobAction {
     payload: {
         name: string;
         namespace: string;
-        image: string;
         schedule: string;
         completions: number;
         parallelism: number;
         backoffLimit: number;
+        template: import("../types/v1/Pod").PodTemplateSpec;
         creationTimestamp: string;
-        containers?: import("../types/v1/Pod").Container[];
     };
 }
 
@@ -323,10 +318,10 @@ export function deleteCronJob(name: string, namespace = "default") {
 
 export function createDaemonSet(
     name: string,
-    spec: { image: string; containers?: import("../types/v1/Pod").Container[] },
+    spec: { template: import("../types/v1/Pod").PodTemplateSpec },
     namespace = "default",
 ): CreateDaemonSetAction {
-    return { type: CreateDaemonSetType, payload: { name, namespace, image: spec.image, containers: spec.containers } };
+    return { type: CreateDaemonSetType, payload: { name, namespace, template: spec.template } };
 }
 
 export function deleteDaemonSet(name: string, namespace = "default") {
@@ -335,7 +330,7 @@ export function deleteDaemonSet(name: string, namespace = "default") {
 
 export function createStatefulSet(
     name: string,
-    spec: { image: string; replicas?: number; serviceName?: string; containers?: import("../types/v1/Pod").Container[] },
+    spec: { replicas?: number; serviceName?: string; template: import("../types/v1/Pod").PodTemplateSpec },
     namespace = "default",
 ): CreateStatefulSetAction {
     return {
@@ -343,10 +338,9 @@ export function createStatefulSet(
         payload: {
             name,
             namespace,
-            image: spec.image,
             replicas: spec.replicas ?? 1,
             serviceName: spec.serviceName ?? name,
-            containers: spec.containers,
+            template: spec.template,
         },
     };
 }
@@ -386,7 +380,7 @@ export function updateDaemonSetStatus(
 
 export function createJob(
     name: string,
-    spec: { image: string; completions?: number; parallelism?: number; backoffLimit?: number; containers?: import("../types/v1/Pod").Container[] },
+    spec: { completions?: number; parallelism?: number; backoffLimit?: number; template: import("../types/v1/Pod").PodTemplateSpec },
     namespace = "default",
     ownerRef?: { kind: string; apiVersion: string; name: string; uid: string },
 ): CreateJobAction {
@@ -395,11 +389,10 @@ export function createJob(
         payload: {
             name,
             namespace,
-            image: spec.image,
             completions: spec.completions ?? 1,
             parallelism: spec.parallelism ?? 1,
             backoffLimit: spec.backoffLimit ?? 6,
-            containers: spec.containers,
+            template: spec.template,
             ownerReferences: ownerRef
                 ? [{ ...ownerRef, controller: true, blockOwnerDeletion: true }]
                 : undefined,
@@ -418,7 +411,7 @@ export function updateJobStatus(
 
 export function createCronJob(
     name: string,
-    spec: { image: string; schedule: string; completions?: number; parallelism?: number; backoffLimit?: number; containers?: import("../types/v1/Pod").Container[] },
+    spec: { schedule: string; completions?: number; parallelism?: number; backoffLimit?: number; template: import("../types/v1/Pod").PodTemplateSpec },
     namespace = "default",
 ): CreateCronJobAction {
     return {
@@ -426,12 +419,11 @@ export function createCronJob(
         payload: {
             name,
             namespace,
-            image: spec.image,
             schedule: spec.schedule,
             completions: spec.completions ?? 1,
             parallelism: spec.parallelism ?? 1,
             backoffLimit: spec.backoffLimit ?? 6,
-            containers: spec.containers,
+            template: spec.template,
             creationTimestamp: new Date().toISOString(),
         },
     };
@@ -505,7 +497,7 @@ export interface CreateReplicaSetAction {
         ownerRef: { name: string; uid: string };
         replicas: number;
         selector: { matchLabels: Record<string, string> };
-        containers: import("../types/v1/Pod").Container[];
+        template: import("../types/v1/Pod").PodTemplateSpec;
     };
 }
 
@@ -546,7 +538,7 @@ export function scaleDeployment(
 
 export function createDeployment(
     name: string,
-    spec: { image: string; replicas?: number; containers?: import("../types/v1/Pod").Container[] },
+    spec: { replicas?: number; template: import("../types/v1/Pod").PodTemplateSpec },
     namespace = "default",
 ): CreateDeploymentAction {
     return {
@@ -554,16 +546,18 @@ export function createDeployment(
         payload: {
             name,
             namespace,
-            image: spec.image,
             replicas: spec.replicas ?? 1,
-            containers: spec.containers,
+            template: spec.template,
         },
     };
 }
 
 export function createPod(
     name: string,
-    spec: { image: string; containerName?: string; ports?: Array<{ containerPort: number }>; env?: import("../types/v1/Pod").EnvRecord[]; labels?: Record<string, string>; restartPolicy?: "Always" | "OnFailure" | "Never"; nodeName?: string },
+    template: {
+        metadata?: { labels?: Record<string, string>; annotations?: Record<string, string> };
+        spec: import("../types/v1/Pod").PodSpec;
+    },
     namespace = "default",
     ownerRef?: { kind: string; apiVersion: string; name: string; uid: string },
 ): CreatePodAction {
@@ -572,13 +566,7 @@ export function createPod(
         payload: {
             name,
             namespace,
-            image: spec.image,
-            containerName: spec.containerName,
-            ports: spec.ports,
-            env: spec.env,
-            labels: spec.labels,
-            restartPolicy: spec.restartPolicy,
-            nodeName: spec.nodeName,
+            template,
             creationTimestamp: new Date().toISOString(),
             ownerReferences: ownerRef
                 ? [{ ...ownerRef, controller: true, blockOwnerDeletion: true }]
@@ -589,7 +577,7 @@ export function createPod(
 
 export const reducer = (state: AppState, action: Action): AppState => {
     if (action.type === CreateReplicaSetType) {
-        const { name, namespace, ownerRef, replicas, selector, containers } = action.payload;
+        const { name, namespace, ownerRef, replicas, selector, template } = action.payload;
         const creationTimestamp = new Date().toISOString();
         return {
             ...state,
@@ -609,10 +597,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
                     spec: {
                         replicas,
                         selector,
-                        template: {
-                            metadata: { name, namespace },
-                            spec: { containers },
-                        },
+                        template,
                     },
                     status: {
                         observedGeneration: 1,
@@ -685,7 +670,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
     }
     if (action.type === CreateDeploymentType) {
-        const { name, namespace, image, replicas, containers } = action.payload;
+        const { name, namespace, replicas, template } = action.payload;
         const creationTimestamp = new Date().toISOString();
         return {
             ...state,
@@ -703,14 +688,8 @@ export const reducer = (state: AppState, action: Action): AppState => {
                     },
                     spec: {
                         replicas,
-                        selector: { matchLabels: { app: name } },
-                        template: {
-                            metadata: {
-                                name,
-                                namespace,
-                            },
-                            spec: { containers: containers ?? [{ name, image }] },
-                        },
+                        selector: { matchLabels: template.metadata.labels ?? { app: name } },
+                        template,
                         strategy: { type: "RollingUpdate" },
                     },
                     status: {
@@ -734,7 +713,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
     }
     if (action.type === CreatePodType) {
-        const { name, namespace, image, containerName, ports, env, labels, restartPolicy, nodeName, creationTimestamp, ownerReferences } = action.payload;
+        const { name, namespace, template, creationTimestamp, ownerReferences } = action.payload;
         return {
             ...state,
             Pods: [
@@ -745,24 +724,22 @@ export const reducer = (state: AppState, action: Action): AppState => {
                         namespace,
                         uid: crypto.randomUUID(),
                         creationTimestamp,
-                        ...(labels && { labels }),
+                        ...(template.metadata?.labels && { labels: template.metadata.labels }),
+                        ...(template.metadata?.annotations && { annotations: template.metadata.annotations }),
                         ...(ownerReferences && { ownerReferences }),
                     },
                     status: {
                         phase: "Pending",
                     },
-                    spec: {
-                        containers: [{ name: containerName ?? name, image, ...(ports && { ports: ports.map(p => ({ name: p.name, containerPort: p.containerPort, protocol: p.protocol ?? "TCP" as const })) }), ...(env?.length && { env }) }],
-                        ...(restartPolicy && { restartPolicy }),
-                        ...(nodeName && { nodeName }),
-                    },
+                    spec: template.spec,
                 },
             ],
         };
     }
     if (action.type === CreateDaemonSetType) {
-        const { name, namespace, image, containers } = action.payload;
+        const { name, namespace, template } = action.payload;
         const creationTimestamp = new Date().toISOString();
+        const labels = template.metadata.labels ?? { app: name };
         const ds: DaemonSet = {
             metadata: {
                 uid: crypto.randomUUID(),
@@ -774,11 +751,8 @@ export const reducer = (state: AppState, action: Action): AppState => {
                 generation: 1,
             },
             spec: {
-                selector: { matchLabels: { app: name } },
-                template: {
-                    metadata: { name, namespace, labels: { app: name } },
-                    spec: { containers: containers ?? [{ name, image }] },
-                },
+                selector: { matchLabels: labels },
+                template,
                 updateStrategy: { type: "RollingUpdate" },
             },
             status: {
@@ -939,7 +913,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
     }
     if (action.type === CreateJobType) {
-        const { name, namespace, image, completions, parallelism, backoffLimit, ownerReferences, creationTimestamp, containers } = action.payload;
+        const { name, namespace, completions, parallelism, backoffLimit, template, ownerReferences, creationTimestamp } = action.payload;
         const job: Job = {
             metadata: {
                 uid: crypto.randomUUID(),
@@ -954,13 +928,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
                 completions,
                 parallelism,
                 backoffLimit,
-                template: {
-                    metadata: { namespace, name, labels: { "job-name": name } },
-                    spec: {
-                        restartPolicy: "Never",
-                        containers: containers ?? [{ name, image }],
-                    },
-                },
+                template,
             },
             status: {
                 active: 0,
@@ -984,7 +952,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
     }
     if (action.type === CreateCronJobType) {
-        const { name, namespace, image, schedule, completions, parallelism, backoffLimit, creationTimestamp, containers } = action.payload;
+        const { name, namespace, schedule, completions, parallelism, backoffLimit, template, creationTimestamp } = action.payload;
         const cj: CronJob = {
             metadata: {
                 uid: crypto.randomUUID(),
@@ -1002,13 +970,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
                         completions,
                         parallelism,
                         backoffLimit,
-                        template: {
-                            metadata: { namespace, name, labels: { "job-name": name } },
-                            spec: {
-                                restartPolicy: "Never",
-                                containers: containers ?? [{ name, image }],
-                            },
-                        },
+                        template,
                     },
                 },
             },
@@ -1078,8 +1040,9 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
     }
     if (action.type === CreateStatefulSetType) {
-        const { name, namespace, image, replicas, serviceName, containers } = action.payload;
+        const { name, namespace, replicas, serviceName, template } = action.payload;
         const creationTimestamp = new Date().toISOString();
+        const labels = template.metadata.labels ?? { app: name };
         const sts: StatefulSet = {
             metadata: {
                 uid: crypto.randomUUID(),
@@ -1092,11 +1055,8 @@ export const reducer = (state: AppState, action: Action): AppState => {
             },
             spec: {
                 replicas,
-                selector: { matchLabels: { app: name } },
-                template: {
-                    metadata: { name, namespace, labels: { app: name } },
-                    spec: { containers: containers ?? [{ name, image }] },
-                },
+                selector: { matchLabels: labels },
+                template,
                 serviceName,
                 podManagementPolicy: "OrderedReady",
                 updateStrategy: { type: "RollingUpdate" },

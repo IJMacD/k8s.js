@@ -44,7 +44,6 @@ export function useReplicaSetController(
             );
 
             const actual = ownedPods.length;
-            const containers = rs.spec.template.spec.containers;
 
             if (actual < desired) {
                 // Create missing pods one at a time, staggering each by RECONCILE_DELAY_MS
@@ -55,11 +54,8 @@ export function useReplicaSetController(
                         dispatch(createPod(
                             podName,
                             {
-                                image: containers[0]?.image ?? "",
-                                containerName: containers[0]?.name,
-                                ports: containers[0]?.ports,
-                                env: containers[0]?.env,
-                                labels: rs.metadata.labels,
+                                metadata: { labels: rs.metadata.labels },
+                                spec: rs.spec.template.spec,
                             },
                             namespace,
                             { kind: "ReplicaSet", apiVersion: "apps/v1", name: rs.metadata.name, uid: rs.metadata.uid },

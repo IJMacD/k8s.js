@@ -100,7 +100,7 @@ export function useDeploymentController(
             );
 
             const makeRS = (replicas: number) =>
-                createReplicaSet({ name: expectedRsName, namespace, ownerRef: { name, uid: deployment.metadata.uid }, replicas, selector: deployment.spec.selector, containers });
+                createReplicaSet({ name: expectedRsName, namespace, ownerRef: { name, uid: deployment.metadata.uid }, replicas, selector: deployment.spec.selector, template: deployment.spec.template });
 
             if (deployment.spec.strategy.type === "Recreate") {
                 // Recreate: kill all old pods first, then bring new RS up
