@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSavedState } from "../hooks/useSavedState";
 
 const PROMPT = '> ';
+const PROMPT_CONT = '  '; // continuation prompt, same width as PROMPT
 
 export function Console({ onCommand, onDismiss }: { onCommand: (command: string) => Promise<string>; onDismiss?: () => void }) {
     const [input, setInput] = useState('');
@@ -22,25 +23,39 @@ export function Console({ onCommand, onDismiss }: { onCommand: (command: string)
     const [inputHistory, setInputHistory] = useSavedState<string[]>('console.inputHistory', []);
     const [historyIndex, setHistoryIndex] = useState<number>(-1);
 
-    const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const handleInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
         setInput(event.target.value);
+        autoResize(event.target);
     };
 
-    const handleInputSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-        event.preventDefault();
-        // Echo the input back to the output
-        setOutput([...output, `${PROMPT}${input}`]);
-        // Push the command to the input queue for processing
-        setInputQueue([...inputQueue, input]);
-        // Add the command to the history
-        if (input.trim() !== '' && (inputHistory.length === 0 || inputHistory[inputHistory.length - 1] !== input)) {
-            setInputHistory([...inputHistory, input]);
+    const submitInput = () => {
+        const lines = input.split('\n');
+        const commands = lines.filter(l => l.trim() !== '');
+        // Echo the typed input (with continuation prompt on wrapped lines)
+        const echo = lines.map((l, i) => `${i === 0 ? PROMPT : PROMPT_CONT}${l}`).join('\n');
+        setOutput(prev => [...prev, echo]);
+        if (commands.length > 0) {
+            // Store each individual command in history, skipping consecutive duplicates
+            const newHistory = [...inputHistory];
+            for (const cmd of commands) {
+                if (newHistory.length === 0 || newHistory[newHistory.length - 1] !== cmd) {
+                    newHistory.push(cmd);
+                }
+            }
+            setInputHistory(newHistory);
+            setInputQueue(prev => [...prev, ...commands]);
         }
-        setHistoryIndex(-1); // Reset history index
+        setHistoryIndex(-1);
         setInput('');
+        if (inputRef.current) inputRef.current.style.height = 'auto';
     };
 
     const outputRef = useRef<HTMLDivElement>(null);
+
+    const autoResize = (el: HTMLTextAreaElement) => {
+        el.style.height = 'auto';
+        el.style.height = `${el.scrollHeight}px`;
+    };
 
     // Scroll to the bottom of the output when new output is added
     useEffect(() => {
@@ -64,33 +79,37 @@ export function Console({ onCommand, onDismiss }: { onCommand: (command: string)
         }
     }, [inputQueue, onCommand]);
 
-     // Handle up/down arrow keys for input history navigation
-     const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-        if (event.key === 'ArrowUp') {
+     // Handle keyboard shortcuts
+     const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
-            // Navigate up in history
-            if (historyIndex < inputHistory.length - 1) {
+            submitInput();
+        } else if (event.key === 'ArrowUp') {
+            const atStart = inputRef.current?.selectionStart === 0;
+            if (atStart && historyIndex < inputHistory.length - 1) {
+                event.preventDefault();
                 const newIndex = historyIndex + 1;
                 setHistoryIndex(newIndex);
                 setInput(inputHistory[inputHistory.length - 1 - newIndex]);
                 moveCursorToEndRef.current = true;
             }
         } else if (event.key === 'ArrowDown') {
-            event.preventDefault();
-            // Navigate down in history
-            if (historyIndex > 0) {
+            const atEnd = inputRef.current?.selectionStart === input.length;
+            if (atEnd && historyIndex > 0) {
+                event.preventDefault();
                 const newIndex = historyIndex - 1;
                 setHistoryIndex(newIndex);
                 setInput(inputHistory[inputHistory.length - 1 - newIndex]);
                 moveCursorToEndRef.current = true;
-            } else {
+            } else if (atEnd && historyIndex === 0) {
+                event.preventDefault();
                 setHistoryIndex(-1);
                 setInput('');
             }
         }
     };
 
-    const inputRef = useRef<HTMLInputElement>(null);
+    const inputRef = useRef<HTMLTextAreaElement>(null);
     const moveCursorToEndRef = useRef(false);
 
     useEffect(() => {
@@ -139,18 +158,18 @@ export function Console({ onCommand, onDismiss }: { onCommand: (command: string)
                     <div key={index} style={{ whiteSpace: 'pre-wrap' }}>{line || '\u00a0'}</div>
                 ))}
             </div>
-            <form onSubmit={handleInputSubmit} style={{ display: 'flex', alignItems: 'center', padding: '0 5px', flexShrink: 0 }}>
-                <span>{PROMPT}</span>
-                <input
-                    type="text"
+            <div style={{ display: 'flex', alignItems: 'flex-start', padding: '0 5px', flexShrink: 0 }}>
+                <span style={{ paddingTop: '4px', lineHeight: '1.5' }}>{PROMPT}</span>
+                <textarea
                     value={input}
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}
-                    style={{ padding: '4px', marginLeft: '4px', backgroundColor: '#1e1e1e', color: '#d4d4d4', border: 'none', outline: 'none', flex: 1, fontFamily: 'monospace', fontSize: '16px' }}
+                    rows={1}
+                    style={{ padding: '4px', marginLeft: '4px', backgroundColor: '#1e1e1e', color: '#d4d4d4', border: 'none', outline: 'none', flex: 1, fontFamily: 'monospace', fontSize: '16px', resize: 'none', overflow: 'hidden', lineHeight: '1.5' }}
                     autoFocus
                     ref={inputRef}
                 />
-            </form>
+            </div>
         </div>
     );
 }
