@@ -37,7 +37,7 @@ function tokenize(input: string): string[] {
 export function command(
     inputLine: string,
     dispatch: ActionDispatch<[action: Action]>,
-    state: AppState,
+    getState: () => AppState,
 ): Promise<string> {
     return new Promise((resolve) => {
         const tokens = tokenize(inputLine.trim());
@@ -63,11 +63,11 @@ export function command(
             resolve(new Date().toString());
             return;
         } else if (command === "ping") {
-            resolve(ping(args, state));
+            resolve(ping(args, getState()));
         } else if (command === "curl") {
-            resolve(curl(args, state));
+            resolve(curl(args, getState()));
         } else if (command === "kubectl") {
-            resolve(kubectl(args, dispatch, state));
+            resolve(kubectl(args, dispatch, getState));
         } else {
             resolve(`Unknown command: ${command}`);
             return;

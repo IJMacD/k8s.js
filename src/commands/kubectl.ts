@@ -24,8 +24,9 @@ function parseKubectlArgs(rawArgs: string[]): { namespace: string; args: string[
 export function kubectl(
     rawArgs: string[],
     dispatch: ActionDispatch<[action: Action]>,
-    state: AppState,
+    getState: () => AppState,
 ): Promise<string> {
+    const state = getState();
     const { namespace, args } = parseKubectlArgs(rawArgs);
     if (args[0] === "run") {
         const name = args[1];
@@ -482,6 +483,72 @@ export function kubectl(
             sections.push(renderGet(type, name));
         }
         return Promise.resolve(sections.join("\n\n"));
+    }
+    if (args[0] === "rollout") {
+        const subCmd = args[1];
+        if (!subCmd) throw Error("kubectl rollout: subcommand required (status, undo)");
+
+        if (subCmd === "status") {
+            const resourceArg = args[2];
+            if (!resourceArg) throw Error("kubectl rollout status: specify a resource (e.g. deployment/<name>)");
+
+            // Only deployments supported for now
+            const kind = resourceArg.includes("/") ? resourceArg.split("/")[0].toLowerCase() : "deployment";
+            const name = resourceArg.includes("/") ? resourceArg.split("/")[1] : (args[3] ?? resourceArg);
+            if (kind !== "deployment" && kind !== "deploy")
+                throw Error("kubectl rollout status: only deployments are supported");
+
+            // Parse --timeout=<N>s (default 300s), --watch=false disables waiting
+            const timeoutFlag = args.find(a => a.startsWith("--timeout="));
+            const timeoutMs = timeoutFlag
+                ? parseInt(timeoutFlag.slice("--timeout=".length), 10) * 1000
+                : 300_000;
+            const noWatch = args.includes("--watch=false") || args.includes("--no-wait");
+
+            const d = state.Deployments.find(
+                dep => dep.metadata.name === name && dep.metadata.namespace === namespace,
+            );
+            if (!d) throw Error(`Error from server (NotFound): deployments "${name}" not found`);
+
+            const isComplete = (s: AppState) => {
+                const dep = s.Deployments.find(
+                    dep => dep.metadata.name === name && dep.metadata.namespace === namespace,
+                );
+                if (!dep) return false;
+                return dep.status.updatedReplicas >= dep.spec.replicas &&
+                    dep.status.readyReplicas >= dep.spec.replicas &&
+                    dep.status.availableReplicas >= dep.spec.replicas;
+            };
+
+            if (noWatch || !getState) {
+                if (isComplete(state)) return Promise.resolve(`deployment "${name}" successfully rolled out`);
+                return Promise.resolve(`Waiting for deployment "${name}" rollout to finish: ${d.status.readyReplicas} of ${d.spec.replicas} updated replicas are available...`);
+            }
+
+            // Poll live state until rollout is complete or timeout
+            return new Promise<string>((resolve, reject) => {
+                const deadline = Date.now() + timeoutMs;
+                const interval = setInterval(() => {
+                    const current = getState!();
+                    if (isComplete(current)) {
+                        clearInterval(interval);
+                        resolve(`deployment "${name}" successfully rolled out`);
+                    } else if (Date.now() >= deadline) {
+                        clearInterval(interval);
+                        const dep = current.Deployments.find(
+                            dep => dep.metadata.name === name && dep.metadata.namespace === namespace,
+                        );
+                        reject(new Error(`error: timed out waiting for the condition on deployments/${name}\n(${dep?.status.readyReplicas ?? 0}/${dep?.spec.replicas ?? 0} replicas available)`));
+                    }
+                }, 500);
+            });
+        }
+
+        if (subCmd === "undo") {
+            throw Error("kubectl rollout undo: not yet implemented");
+        }
+
+        throw Error(`kubectl rollout: unknown subcommand "${subCmd}"`);
     }
     if (args[0] === "describe") {
         const resourceArg = args[1];

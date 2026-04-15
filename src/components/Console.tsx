@@ -16,6 +16,7 @@ export function Console({ onCommand, onDismiss }: { onCommand: (command: string)
         '',
         '  kubectl create deployment web --image=nginx --replicas=3',
         '  kubectl expose deployment web --port=80',
+        '  kubectl rollout status deployment/web',
         '  curl -i web',
         '',
     ]);
@@ -64,15 +65,22 @@ export function Console({ onCommand, onDismiss }: { onCommand: (command: string)
         }
     }, [output]);
 
+    // Guard against re-entrancy: onCommand is recreated every render (it closes over store),
+    // so the effect would fire again mid-command whenever App re-renders (e.g. during rollout polling).
+    const processingRef = useRef(false);
+
     // Process commands from the input queue
     // Wait for the onCommand promise to resolve before processing the next command in the queue
     useEffect(() => {
-        if (inputQueue.length > 0) {
+        if (inputQueue.length > 0 && !processingRef.current) {
+            processingRef.current = true;
             const command = inputQueue[0];
             onCommand(command).then((result) => {
+                processingRef.current = false;
                 setOutput((prevOutput) => [...prevOutput, result]);
                 setInputQueue((prevQueue) => prevQueue.slice(1)); // Remove the processed command from the queue
             }).catch((e) => {
+                processingRef.current = false;
                 setOutput(prevOutput => [...prevOutput, e.message])
                 setInputQueue(prevQueue => prevQueue.slice(1))
             });
@@ -158,7 +166,7 @@ export function Console({ onCommand, onDismiss }: { onCommand: (command: string)
                     <div key={index} style={{ whiteSpace: 'pre-wrap' }}>{line || '\u00a0'}</div>
                 ))}
             </div>
-            <div style={{ display: 'flex', alignItems: 'flex-start', padding: '0 5px', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', padding: '0 5px', flexShrink: 0, visibility: inputQueue.length > 0 ? 'hidden' : 'visible' }}>
                 <span style={{ paddingTop: '4px', lineHeight: '1.5' }}>{PROMPT}</span>
                 <textarea
                     value={input}

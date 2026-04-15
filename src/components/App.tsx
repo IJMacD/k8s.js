@@ -1,4 +1,4 @@
-import { useReducer, useState } from 'react';
+import { useReducer, useRef, useState } from 'react';
 import './App.css'
 import { Console } from './Console'
 import { reducer, type Action, type AppState } from '../store/store';
@@ -63,8 +63,12 @@ function App() {
   useCronJobController(store, dispatch);
   useDaemonSetController(store, dispatch);
 
+  const storeRef = useRef(store);
+  // eslint-disable-next-line react-hooks/refs
+  storeRef.current = store;
+
   function handleCommand(inputLine: string): Promise<string> {
-    return command(inputLine, dispatch, store);
+    return command(inputLine, dispatch, () => storeRef.current);
   }
 
   return (
