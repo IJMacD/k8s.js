@@ -21,6 +21,41 @@ function parseKubectlArgs(rawArgs: string[]): { namespace: string; args: string[
     return { namespace, args };
 }
 
+type PodTemplate = {
+    metadata: { labels?: Record<string, string> };
+    spec: { containers: import("../types/v1/Pod").Container[] };
+};
+
+function fmtEnvLines(env: import("../types/v1/Pod").EnvRecord[] | undefined): string[] {
+    if (!env?.length) return [`    Environment:  <none>`];
+    return [
+        `    Environment:`,
+        ...env.map(e => {
+            if (e.value != null) return `      ${e.name}:  ${e.value}`;
+            if (e.valueFrom?.fieldRef) return `      ${e.name}:   (${e.valueFrom.fieldRef.apiVersion}:${e.valueFrom.fieldRef.fieldPath})`;
+            if (e.valueFrom?.configMapKeyRef) return `      ${e.name}:  <set to the key '${e.valueFrom.configMapKeyRef.key}' in configmap '${e.valueFrom.configMapKeyRef.name}'>`;
+            if (e.valueFrom?.secretKeyRef) return `      ${e.name}:  <set to the key '${e.valueFrom.secretKeyRef.key}' in secret '${e.valueFrom.secretKeyRef.name}'>`;
+            return `      ${e.name}:  <set>`;
+        }),
+    ];
+}
+
+function podTemplateLines(template: PodTemplate): string[] {
+    const fmtPort = (p: import("../types/v1/Pod").ContainerPort) =>
+        p.name ? `${p.containerPort}/${p.protocol ?? "TCP"} (${p.name})` : `${p.containerPort}/${p.protocol ?? "TCP"}`;
+    return [
+        `Pod Template:`,
+        `  Labels:  ${Object.entries(template.metadata.labels ?? {}).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
+        `  Containers:`,
+        ...template.spec.containers.flatMap(c => [
+            `   ${c.name}:`,
+            `    Image:       ${c.image}`,
+            `    Port:        ${c.ports?.length ? c.ports.map(fmtPort).join(", ") : "<none>"}`,
+            ...fmtEnvLines(c.env),
+        ]),
+    ];
+}
+
 export async function* kubectl(
     rawArgs: string[],
     dispatch: ActionDispatch<[action: Action]>,
@@ -35,9 +70,18 @@ export async function* kubectl(
             const image = args[3];
             const restartFlag = args.find(a => a.startsWith("--restart="));
             const restartPolicy = restartFlag?.slice("--restart=".length) as "Always" | "OnFailure" | "Never" | undefined;
+            const envArgs: string[] = [];
+            for (let i = 0; i < args.length; i++) {
+                if (args[i].startsWith("--env=")) envArgs.push(args[i].slice("--env=".length));
+                else if (args[i] === "--env" && args[i + 1]) envArgs.push(args[++i]);
+            }
+            const env = envArgs.map(kv => {
+                const eq = kv.indexOf("=");
+                return eq < 0 ? { name: kv, value: "" } : { name: kv.slice(0, eq), value: kv.slice(eq + 1) };
+            });
             if (state.Pods.some(p => p.metadata.name === name && p.metadata.namespace === namespace))
                 throw Error(`Error from server (AlreadyExists): pods "${name}" already exists`);
-            dispatch(createPod(name, { image, restartPolicy }, namespace));
+            dispatch(createPod(name, { image, restartPolicy, ...(env.length && { env }) }, namespace));
             yield `pod/${name} created`; return;
         } else {
             throw Error("Expecting --image");
@@ -629,7 +673,6 @@ export async function* kubectl(
             const ownedPods = state.Pods.filter(
                 p => p.metadata.ownerReferences?.some(r => r.kind === "DaemonSet" && r.name === name) && p.metadata.namespace === namespace,
             );
-            const containers = ds.spec.template.spec.containers;
             const lines = [
                 `Name:           ${ds.metadata.name}`,
                 `Selector:       ${Object.entries(ds.spec.selector.matchLabels).map(([k, v]) => `${k}=${v}`).join(",")}`,
@@ -642,14 +685,7 @@ export async function* kubectl(
                 `Number of Nodes Scheduled with Available Pods: ${ds.status.numberAvailable}`,
                 `Number of Nodes Misscheduled: 0`,
                 `Pods Status:    ${ds.status.numberReady} Running / ${ownedPods.filter(p => p.status.phase === "Pending").length} Waiting / 0 Succeeded / 0 Failed`,
-                `Pod Template:`,
-                `  Labels:  ${Object.entries(ds.spec.template.metadata.labels ?? {}).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
-                `  Containers:`,
-                ...containers.flatMap(c => [
-                    `   ${c.name}:`,
-                    `    Image:  ${c.image}`,
-                    `    Port:   ${c.ports?.length ? c.ports.map(p => p.name ? `${p.containerPort}/${p.protocol ?? "TCP"} (${p.name})` : `${p.containerPort}/${p.protocol ?? "TCP"}`).join(", ") : "<none>"}`,
-                ]),
+                ...podTemplateLines(ds.spec.template),
                 `Update Strategy: ${ds.spec.updateStrategy.type}`,
                 `Events:  <none>`,
             ];
@@ -665,7 +701,6 @@ export async function* kubectl(
             const ownedPods = state.Pods.filter(
                 p => p.metadata.ownerReferences?.some(r => r.kind === "StatefulSet" && r.name === name) && p.metadata.namespace === namespace,
             );
-            const containers = sts.spec.template.spec.containers;
             const runningCount = ownedPods.filter(p => p.status.phase === "Running").length;
             const pendingCount = ownedPods.filter(p => p.status.phase === "Pending").length;
             const lines = [
@@ -680,14 +715,7 @@ export async function* kubectl(
                 `  Partition:        0`,
                 `Pod Management Policy:  ${sts.spec.podManagementPolicy ?? "OrderedReady"}`,
                 `Pods Status:        ${runningCount} Running / ${pendingCount} Waiting / 0 Succeeded / 0 Failed`,
-                `Pod Template:`,
-                `  Labels:  ${Object.entries(sts.spec.template.metadata.labels ?? {}).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
-                `  Containers:`,
-                ...containers.flatMap(c => [
-                    `   ${c.name}:`,
-                    `    Image:  ${c.image}`,
-                    `    Port:   ${c.ports?.length ? c.ports.map(p => p.name ? `${p.containerPort}/${p.protocol ?? "TCP"} (${p.name})` : `${p.containerPort}/${p.protocol ?? "TCP"}`).join(", ") : "<none>"}`,
-                ]),
+                ...podTemplateLines(sts.spec.template),
                 `Volume Claim Templates:  <none>`,
                 `Service Name:  ${sts.spec.serviceName}`,
                 `Events:        <none>`,
@@ -713,7 +741,6 @@ export async function* kubectl(
                 .sort((a, b) => new Date(b.metadata.creationTimestamp).getTime() - new Date(a.metadata.creationTimestamp).getTime())
                 .find(rs => rs.spec.replicas > 0) ?? ownedRSes[0];
             const oldRSes = ownedRSes.filter(rs => rs !== currentRS && rs.spec.replicas > 0);
-            const containers = dep.spec.template.spec.containers;
             const lines = [
                 `Name:                   ${dep.metadata.name}`,
                 `Namespace:              ${dep.metadata.namespace}`,
@@ -727,15 +754,7 @@ export async function* kubectl(
                 ...(strategy.type === "RollingUpdate" && ruSpec
                     ? [`RollingUpdateStrategy:  ${ruSpec.maxUnavailable} max unavailable, ${ruSpec.maxSurge} max surge`]
                     : []),
-                `Pod Template:`,
-                `  Labels:  ${Object.entries(dep.spec.template.metadata.labels ?? {}).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
-                `  Containers:`,
-                ...containers.flatMap(c => [
-                    `   ${c.name}:`,
-                    `    Image:       ${c.image}`,
-                    `    Port:        ${c.ports?.length ? c.ports.map(p => p.name ? `${p.containerPort}/${p.protocol ?? "TCP"} (${p.name})` : `${p.containerPort}/${p.protocol ?? "TCP"}`).join(", ") : "<none>"}`,
-                    `    Environment: <none>`,
-                ]),
+                ...podTemplateLines(dep.spec.template),
                 `Conditions:`,
                 `  Type           Status  Reason`,
                 `  ----           ------  ------`,
@@ -762,7 +781,6 @@ export async function* kubectl(
             const waitingCount = ownedPods.filter(p => p.status.phase === "Pending").length;
             const succeededCount = ownedPods.filter(p => p.status.phase === "Succeeded").length;
             const failedCount = ownedPods.filter(p => p.status.phase === "Failed").length;
-            const containers = rs.spec.template.spec.containers;
             const lines = [
                 `Name:           ${rs.metadata.name}`,
                 `Namespace:      ${rs.metadata.namespace}`,
@@ -772,14 +790,7 @@ export async function* kubectl(
                 ...(ownerDep ? [`Controlled By:  Deployment/${ownerDep.name}`] : []),
                 `Replicas:       ${rs.status.replicas} current / ${rs.spec.replicas} desired`,
                 `Pods Status:    ${runningCount} Running / ${waitingCount} Waiting / ${succeededCount} Succeeded / ${failedCount} Failed`,
-                `Pod Template:`,
-                `  Labels:  ${Object.entries(rs.spec.template.metadata.labels ?? {}).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
-                `  Containers:`,
-                ...containers.flatMap(c => [
-                    `   ${c.name}:`,
-                    `    Image:  ${c.image}`,
-                    `    Port:   ${c.ports?.length ? c.ports.map(p => p.name ? `${p.containerPort}/${p.protocol ?? "TCP"} (${p.name})` : `${p.containerPort}/${p.protocol ?? "TCP"}`).join(", ") : "<none>"}`,
-                ]),
+                ...podTemplateLines(rs.spec.template),
                 `Conditions:`,
                 `  Type             Status`,
                 `  ----             ------`,
@@ -895,7 +906,7 @@ export async function* kubectl(
 
             const containerReady = pod.status.conditions?.find(c => c.type === "ContainersReady")?.status === "True";
 
-            const containerStateLines = (c: { name: string; image: string; ports?: import("../types/v1/Pod").ContainerPort[] }): string[] => {
+            const containerStateLines = (c: { name: string; image: string; ports?: import("../types/v1/Pod").ContainerPort[]; env?: import("../types/v1/Pod").EnvRecord[] }): string[] => {
                 const fmtPort = (p: import("../types/v1/Pod").ContainerPort) =>
                     p.name ? `${p.containerPort}/${p.protocol ?? "TCP"} (${p.name})` : `${p.containerPort}/${p.protocol ?? "TCP"}`;
                 const base = [
@@ -903,6 +914,7 @@ export async function* kubectl(
                     `    Image:          ${c.image}`,
                     `    Port:           ${c.ports?.length ? c.ports.map(fmtPort).join(", ") : "<none>"}`,
                     `    Host Port:      0/TCP`,
+                    ...fmtEnvLines(c.env),
                 ];
                 switch (pod.status.phase) {
                     case "Running":

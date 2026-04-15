@@ -101,6 +101,7 @@ export interface CreatePodAction {
         image: string;
         containerName?: string;
         ports?: Array<{ name?: string; containerPort: number; protocol?: "TCP" | "UDP" }>;
+        env?: import("../types/v1/Pod").EnvRecord[];
         labels?: Record<string, string>;
         restartPolicy?: "Always" | "OnFailure" | "Never";
         nodeName?: string;
@@ -556,7 +557,7 @@ export function createDeployment(
 
 export function createPod(
     name: string,
-    spec: { image: string; containerName?: string; ports?: Array<{ containerPort: number }>; labels?: Record<string, string>; restartPolicy?: "Always" | "OnFailure" | "Never"; nodeName?: string },
+    spec: { image: string; containerName?: string; ports?: Array<{ containerPort: number }>; env?: import("../types/v1/Pod").EnvRecord[]; labels?: Record<string, string>; restartPolicy?: "Always" | "OnFailure" | "Never"; nodeName?: string },
     namespace = "default",
     ownerRef?: { kind: string; apiVersion: string; name: string; uid: string },
 ): CreatePodAction {
@@ -568,6 +569,7 @@ export function createPod(
             image: spec.image,
             containerName: spec.containerName,
             ports: spec.ports,
+            env: spec.env,
             labels: spec.labels,
             restartPolicy: spec.restartPolicy,
             nodeName: spec.nodeName,
@@ -726,7 +728,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
     }
     if (action.type === CreatePodType) {
-        const { name, namespace, image, containerName, ports, labels, restartPolicy, nodeName, creationTimestamp, ownerReferences } = action.payload;
+        const { name, namespace, image, containerName, ports, env, labels, restartPolicy, nodeName, creationTimestamp, ownerReferences } = action.payload;
         return {
             ...state,
             Pods: [
@@ -744,7 +746,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
                         phase: "Pending",
                     },
                     spec: {
-                        containers: [{ name: containerName ?? name, image, ...(ports && { ports: ports.map(p => ({ name: p.name, containerPort: p.containerPort, protocol: p.protocol ?? "TCP" as const })) }) }],
+                        containers: [{ name: containerName ?? name, image, ...(ports && { ports: ports.map(p => ({ name: p.name, containerPort: p.containerPort, protocol: p.protocol ?? "TCP" as const })) }), ...(env?.length && { env }) }],
                         ...(restartPolicy && { restartPolicy }),
                         ...(nodeName && { nodeName }),
                     },
