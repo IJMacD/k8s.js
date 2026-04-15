@@ -3,13 +3,17 @@
  * @returns JSX.Element
  */
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useSavedState } from "../hooks/useSavedState";
 
 const PROMPT = '> ';
 const PROMPT_CONT = '  '; // continuation prompt, same width as PROMPT
 
-export function Console({ onCommand }: { onCommand: (command: string) => AsyncGenerator<string>; }) {
+export interface ConsoleHandle {
+    submitCommand: (cmd: string) => void;
+}
+
+export const Console = forwardRef<ConsoleHandle, { onCommand: (command: string) => AsyncGenerator<string> }>(function Console({ onCommand }, ref) {
     const [input, setInput] = useState('');
     const [output, setOutput] = useState<string[]>([
         'Welcome to k8s.js! Try a few commands to get started:',
@@ -23,6 +27,16 @@ export function Console({ onCommand }: { onCommand: (command: string) => AsyncGe
     const [inputQueue, setInputQueue] = useState<string[]>([]);
     const [inputHistory, setInputHistory] = useSavedState<string[]>('console.inputHistory', []);
     const [historyIndex, setHistoryIndex] = useState<number>(-1);
+
+    useImperativeHandle(ref, () => ({
+        submitCommand(cmd: string) {
+            setOutput(prev => [...prev, `${PROMPT}${cmd}`]);
+            setInputHistory(prev =>
+                prev.length > 0 && prev[prev.length - 1] === cmd ? prev : [...prev, cmd],
+            );
+            setInputQueue(prev => [...prev, cmd]);
+        },
+    }));
 
     const handleInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
         setInput(event.target.value);
@@ -172,4 +186,4 @@ export function Console({ onCommand }: { onCommand: (command: string) => AsyncGe
             </div>
         </div>
     );
-}
+});

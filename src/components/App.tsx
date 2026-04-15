@@ -1,9 +1,11 @@
 import { useReducer, useRef, useState } from 'react';
 import './App.css'
 import { Console } from './Console'
+import type { ConsoleHandle } from './Console'
 import { Browser } from './Browser'
 import { reducer, type Action, type AppState } from '../store/store';
 import { command } from '../commands/command';
+import { stageUpload } from '../commands/kubectl-apply';
 import { ResourceTabs } from './ResourceTabs';
 import { useDeploymentController } from '../controllers/useDeploymentController';
 import { useReplicaSetController } from '../controllers/useReplicaSetController';
@@ -71,6 +73,21 @@ function App() {
   // eslint-disable-next-line react-hooks/refs
   storeRef.current = store;
 
+  const consoleRef = useRef<ConsoleHandle>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    file.text().then(content => {
+      stageUpload(file.name, content);
+      setBottomTab('terminal');
+      consoleRef.current?.submitCommand(`kubectl apply -f ${file.name}`);
+      // Reset so the same file can be re-applied
+      e.target.value = '';
+    });
+  }
+
   function handleCommand(inputLine: string): AsyncGenerator<string> {
     return command(inputLine, dispatch, () => storeRef.current);
   }
@@ -78,7 +95,23 @@ function App() {
   return (
     <>
       <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-        <h1>k8s.js</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '0 16px' }}>
+          <h1 style={{ margin: '16px 0' }}>k8s.js</h1>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".yaml,.yml"
+            style={{ display: 'none' }}
+            onChange={handleFileChange}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            title="Apply a YAML manifest"
+            style={{ background: '#3a3a3a', border: '1px solid #555', borderRadius: '4px', color: '#d4d4d4', cursor: 'pointer', fontFamily: 'monospace', fontSize: '12px', padding: '4px 12px' }}
+          >
+            Apply YAML
+          </button>
+        </div>
         <ResourceTabs
           Deployments={store.Deployments}
           DaemonSets={store.DaemonSets}
@@ -124,7 +157,7 @@ function App() {
         </div>
         {/* Panels */}
         <div style={{ display: bottomTab === 'terminal' ? undefined : 'none' }}>
-          <Console onCommand={handleCommand} />
+          <Console ref={consoleRef} onCommand={handleCommand} />
         </div>
         <div style={{ display: bottomTab === 'browser' ? undefined : 'none' }}>
           <Browser state={store} />

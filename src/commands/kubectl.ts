@@ -4,6 +4,7 @@ import {
     type Action,
     type AppState,
 } from "../store/store";
+import { kubectlApply } from "./kubectl-apply";
 import { kubectlCreate } from "./kubectl-create";
 import { kubectlDelete } from "./kubectl-delete";
 import { kubectlDescribe } from "./kubectl-describe";
@@ -41,6 +42,10 @@ export async function* kubectl(
 ): AsyncGenerator<string> {
     const state = getState();
     const { namespace, args } = parseKubectlArgs(rawArgs);
+    if (args[0] === "apply") {
+        yield* kubectlApply(args, namespace, state, dispatch);
+        return;
+    }
     if (args[0] === "run" || args[0] === "create") {
         yield* kubectlCreate(args, namespace, state, dispatch);
         return;

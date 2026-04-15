@@ -90,7 +90,7 @@ export type ActionType =
 
 export interface CreateDeploymentAction {
     type: typeof CreateDeploymentType;
-    payload: { name: string; namespace: string; image: string; replicas: number };
+    payload: { name: string; namespace: string; image: string; replicas: number; containers?: import("../types/v1/Pod").Container[] };
 }
 
 export interface CreatePodAction {
@@ -112,12 +112,12 @@ export interface CreatePodAction {
 
 export interface CreateDaemonSetAction {
     type: typeof CreateDaemonSetType;
-    payload: { name: string; namespace: string; image: string };
+    payload: { name: string; namespace: string; image: string; containers?: import("../types/v1/Pod").Container[] };
 }
 
 export interface CreateStatefulSetAction {
     type: typeof CreateStatefulSetType;
-    payload: { name: string; namespace: string; image: string; replicas: number; serviceName: string };
+    payload: { name: string; namespace: string; image: string; replicas: number; serviceName: string; containers?: import("../types/v1/Pod").Container[] };
 }
 
 export interface UpdateStatefulSetStatusAction {
@@ -149,6 +149,7 @@ export interface CreateJobAction {
         backoffLimit: number;
         ownerReferences?: OwnerReference[];
         creationTimestamp: string;
+        containers?: import("../types/v1/Pod").Container[];
     };
 }
 
@@ -172,6 +173,7 @@ export interface CreateCronJobAction {
         parallelism: number;
         backoffLimit: number;
         creationTimestamp: string;
+        containers?: import("../types/v1/Pod").Container[];
     };
 }
 
@@ -321,10 +323,10 @@ export function deleteCronJob(name: string, namespace = "default") {
 
 export function createDaemonSet(
     name: string,
-    spec: { image: string },
+    spec: { image: string; containers?: import("../types/v1/Pod").Container[] },
     namespace = "default",
 ): CreateDaemonSetAction {
-    return { type: CreateDaemonSetType, payload: { name, namespace, image: spec.image } };
+    return { type: CreateDaemonSetType, payload: { name, namespace, image: spec.image, containers: spec.containers } };
 }
 
 export function deleteDaemonSet(name: string, namespace = "default") {
@@ -333,7 +335,7 @@ export function deleteDaemonSet(name: string, namespace = "default") {
 
 export function createStatefulSet(
     name: string,
-    spec: { image: string; replicas?: number; serviceName?: string },
+    spec: { image: string; replicas?: number; serviceName?: string; containers?: import("../types/v1/Pod").Container[] },
     namespace = "default",
 ): CreateStatefulSetAction {
     return {
@@ -344,6 +346,7 @@ export function createStatefulSet(
             image: spec.image,
             replicas: spec.replicas ?? 1,
             serviceName: spec.serviceName ?? name,
+            containers: spec.containers,
         },
     };
 }
@@ -383,7 +386,7 @@ export function updateDaemonSetStatus(
 
 export function createJob(
     name: string,
-    spec: { image: string; completions?: number; parallelism?: number; backoffLimit?: number },
+    spec: { image: string; completions?: number; parallelism?: number; backoffLimit?: number; containers?: import("../types/v1/Pod").Container[] },
     namespace = "default",
     ownerRef?: { kind: string; apiVersion: string; name: string; uid: string },
 ): CreateJobAction {
@@ -396,6 +399,7 @@ export function createJob(
             completions: spec.completions ?? 1,
             parallelism: spec.parallelism ?? 1,
             backoffLimit: spec.backoffLimit ?? 6,
+            containers: spec.containers,
             ownerReferences: ownerRef
                 ? [{ ...ownerRef, controller: true, blockOwnerDeletion: true }]
                 : undefined,
@@ -414,7 +418,7 @@ export function updateJobStatus(
 
 export function createCronJob(
     name: string,
-    spec: { image: string; schedule: string; completions?: number; parallelism?: number; backoffLimit?: number },
+    spec: { image: string; schedule: string; completions?: number; parallelism?: number; backoffLimit?: number; containers?: import("../types/v1/Pod").Container[] },
     namespace = "default",
 ): CreateCronJobAction {
     return {
@@ -427,6 +431,7 @@ export function createCronJob(
             completions: spec.completions ?? 1,
             parallelism: spec.parallelism ?? 1,
             backoffLimit: spec.backoffLimit ?? 6,
+            containers: spec.containers,
             creationTimestamp: new Date().toISOString(),
         },
     };
@@ -541,7 +546,7 @@ export function scaleDeployment(
 
 export function createDeployment(
     name: string,
-    spec: { image: string; replicas?: number },
+    spec: { image: string; replicas?: number; containers?: import("../types/v1/Pod").Container[] },
     namespace = "default",
 ): CreateDeploymentAction {
     return {
@@ -551,6 +556,7 @@ export function createDeployment(
             namespace,
             image: spec.image,
             replicas: spec.replicas ?? 1,
+            containers: spec.containers,
         },
     };
 }
@@ -679,7 +685,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
     }
     if (action.type === CreateDeploymentType) {
-        const { name, namespace, image, replicas } = action.payload;
+        const { name, namespace, image, replicas, containers } = action.payload;
         const creationTimestamp = new Date().toISOString();
         return {
             ...state,
@@ -703,7 +709,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
                                 name,
                                 namespace,
                             },
-                            spec: { containers: [{ name, image }] },
+                            spec: { containers: containers ?? [{ name, image }] },
                         },
                         strategy: { type: "RollingUpdate" },
                     },
@@ -755,7 +761,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
     }
     if (action.type === CreateDaemonSetType) {
-        const { name, namespace, image } = action.payload;
+        const { name, namespace, image, containers } = action.payload;
         const creationTimestamp = new Date().toISOString();
         const ds: DaemonSet = {
             metadata: {
@@ -771,7 +777,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
                 selector: { matchLabels: { app: name } },
                 template: {
                     metadata: { name, namespace, labels: { app: name } },
-                    spec: { containers: [{ name, image }] },
+                    spec: { containers: containers ?? [{ name, image }] },
                 },
                 updateStrategy: { type: "RollingUpdate" },
             },
@@ -933,7 +939,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
     }
     if (action.type === CreateJobType) {
-        const { name, namespace, image, completions, parallelism, backoffLimit, ownerReferences, creationTimestamp } = action.payload;
+        const { name, namespace, image, completions, parallelism, backoffLimit, ownerReferences, creationTimestamp, containers } = action.payload;
         const job: Job = {
             metadata: {
                 uid: crypto.randomUUID(),
@@ -952,7 +958,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
                     metadata: { namespace, name, labels: { "job-name": name } },
                     spec: {
                         restartPolicy: "Never",
-                        containers: [{ name, image }],
+                        containers: containers ?? [{ name, image }],
                     },
                 },
             },
@@ -978,7 +984,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
     }
     if (action.type === CreateCronJobType) {
-        const { name, namespace, image, schedule, completions, parallelism, backoffLimit, creationTimestamp } = action.payload;
+        const { name, namespace, image, schedule, completions, parallelism, backoffLimit, creationTimestamp, containers } = action.payload;
         const cj: CronJob = {
             metadata: {
                 uid: crypto.randomUUID(),
@@ -1000,7 +1006,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
                             metadata: { namespace, name, labels: { "job-name": name } },
                             spec: {
                                 restartPolicy: "Never",
-                                containers: [{ name, image }],
+                                containers: containers ?? [{ name, image }],
                             },
                         },
                     },
@@ -1072,7 +1078,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
     }
     if (action.type === CreateStatefulSetType) {
-        const { name, namespace, image, replicas, serviceName } = action.payload;
+        const { name, namespace, image, replicas, serviceName, containers } = action.payload;
         const creationTimestamp = new Date().toISOString();
         const sts: StatefulSet = {
             metadata: {
@@ -1089,7 +1095,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
                 selector: { matchLabels: { app: name } },
                 template: {
                     metadata: { name, namespace, labels: { app: name } },
-                    spec: { containers: [{ name, image }] },
+                    spec: { containers: containers ?? [{ name, image }] },
                 },
                 serviceName,
                 podManagementPolicy: "OrderedReady",
