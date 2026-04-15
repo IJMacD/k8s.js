@@ -51,7 +51,6 @@ interface CurlFlags {
     url: string;
     port: number;     // always resolved: from URL, --port flag, or scheme default (80/443)
     path: string;
-    namespace: string;
 }
 
 function parseArgs(rawArgs: string[]): CurlFlags {
@@ -60,17 +59,12 @@ function parseArgs(rawArgs: string[]): CurlFlags {
     let verbose = false;
     let urlArg = "";
     let portOverride: number | null = null;
-    let namespace = "default";
 
     for (let i = 0; i < rawArgs.length; i++) {
         const a = rawArgs[i];
         if (a === "-i" || a === "--include") { include = true; continue; }
         if (a === "-I" || a === "--head") { head = true; include = true; continue; }
         if (a === "-v" || a === "--verbose") { verbose = true; include = true; continue; }
-        if (a === "-n" || a === "--namespace") { namespace = rawArgs[++i] ?? "default"; continue; }
-        if (a.startsWith("--namespace=")) { namespace = a.slice("--namespace=".length); continue; }
-        if (a === "--port" || a === "-p") { portOverride = parseInt(rawArgs[++i] ?? "80", 10); continue; }
-        if (a.startsWith("--port=")) { portOverride = parseInt(a.slice("--port=".length), 10); continue; }
         // skip curl flags that take a value we don't use
         if (a === "-H" || a === "--header" || a === "-d" || a === "--data" ||
             a === "-X" || a === "--request" || a === "-o" || a === "--output" ||
@@ -106,7 +100,7 @@ function parseArgs(rawArgs: string[]): CurlFlags {
         }
     }
 
-    return { include, head, verbose, url: host, port: portOverride ?? schemeDefaultPort, path, namespace };
+    return { include, head, verbose, url: host, port: portOverride ?? schemeDefaultPort, path };
 }
 
 // ---------------------------------------------------------------------------
@@ -129,7 +123,7 @@ type ResolveResult =
     | { ok: true; target: Target }
     | { ok: false; reason: "not_found" | "port_refused"; port: number }
 
-function resolve(host: string, portHint: number, ns: string, state: AppState): ResolveResult {
+function resolve(host: string, portHint: number, state: AppState): ResolveResult {
     const { Pods, Services } = state;
 
     // --- 1. Direct pod IP ---
@@ -177,8 +171,8 @@ function resolve(host: string, portHint: number, ns: string, state: AppState): R
             if (r.ok || r.reason === "port_refused") return r;
         }
     }
-    // Short DNS: just <svc> — try the provided namespace
-    const svcByName = Services.find(s => s.metadata.name === host && s.metadata.namespace === ns);
+    // Short DNS: just <svc> — try the default namespace
+    const svcByName = Services.find(s => s.metadata.name === host && s.metadata.namespace === "default");
     if (svcByName) {
         return resolveViaService(svcByName.metadata.name, svcByName.metadata.namespace, portHint, state);
     }
@@ -313,7 +307,7 @@ export function curl(rawArgs: string[], state: AppState): string {
         ].join("\n");
     }
 
-    const result = resolve(flags.url, flags.port, flags.namespace, state);
+    const result = resolve(flags.url, flags.port, state);
 
     if (!result.ok) {
         if (result.reason === "port_refused") {
