@@ -148,6 +148,39 @@ export function useCronJobController(
         }
     }, [Jobs, CronJobs, dispatch]);
 
+    // History pruning: delete old completed/failed Jobs beyond history limits
+    useEffect(() => {
+        for (const cj of CronJobs) {
+            const { name, namespace } = cj.metadata;
+            const successLimit = cj.spec.successfulJobsHistoryLimit ?? 3;
+            const failLimit = cj.spec.failedJobsHistoryLimit ?? 1;
+
+            const ownedJobs = Jobs.filter(j =>
+                j.metadata.ownerReferences?.some(r => r.kind === "CronJob" && r.name === name) &&
+                j.metadata.namespace === namespace,
+            );
+
+            const newestFirst = (a: { status: { completionTime?: string; startTime?: string } }, b: typeof a) =>
+                new Date(b.status.completionTime ?? b.status.startTime ?? 0).getTime() -
+                new Date(a.status.completionTime ?? a.status.startTime ?? 0).getTime();
+
+            const succeededJobs = ownedJobs
+                .filter(j => j.status.conditions.some(c => c.type === "Complete" && c.status === "True"))
+                .sort(newestFirst);
+
+            const failedJobs = ownedJobs
+                .filter(j => j.status.conditions.some(c => c.type === "Failed" && c.status === "True"))
+                .sort(newestFirst);
+
+            for (const job of succeededJobs.slice(successLimit)) {
+                dispatch(deleteJob(job.metadata.name, job.metadata.namespace));
+            }
+            for (const job of failedJobs.slice(failLimit)) {
+                dispatch(deleteJob(job.metadata.name, job.metadata.namespace));
+            }
+        }
+    }, [Jobs, CronJobs, dispatch]);
+
     // Cancel all pending timers on unmount
     useEffect(() => {
         const map = schedulersRef.current;

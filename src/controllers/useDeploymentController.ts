@@ -91,6 +91,24 @@ export function useDeploymentController(
                     dispatch(scaleReplicaSet(expectedRsName, deployment.spec.replicas, namespace));
                 }, RECONCILE_DELAY_MS));
             }
+
+            // Revision history pruning: delete stale scaled-to-0 RSes beyond revisionHistoryLimit
+            const historyLimit = deployment.spec.revisionHistoryLimit ?? 10;
+            const staleRSes = ownedRSes
+                .filter(rs => rs.metadata.name !== expectedRsName && rs.spec.replicas === 0)
+                .sort((a, b) =>
+                    new Date(a.metadata.creationTimestamp).getTime() -
+                    new Date(b.metadata.creationTimestamp).getTime(),
+                );
+            const excess = staleRSes.length - historyLimit;
+            if (excess > 0) {
+                for (const rs of staleRSes.slice(0, excess)) {
+                    timers.push(setTimeout(
+                        () => dispatch(deleteReplicaSet(rs.metadata.name, namespace)),
+                        RECONCILE_DELAY_MS,
+                    ));
+                }
+            }
         }
 
         return () => timers.forEach(clearTimeout);
