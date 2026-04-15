@@ -10,7 +10,14 @@ const PROMPT = '> ';
 
 export function Console({ onCommand, onDismiss }: { onCommand: (command: string) => Promise<string>; onDismiss?: () => void }) {
     const [input, setInput] = useState('');
-    const [output, setOutput] = useState<string[]>([]);
+    const [output, setOutput] = useState<string[]>([
+        'Welcome to k8s.js! Try a few commands to get started:',
+        '',
+        '  kubectl create deployment web --image=nginx --replicas=3',
+        '  kubectl expose deployment web --port=80',
+        '  curl -i web',
+        '',
+    ]);
     const [inputQueue, setInputQueue] = useState<string[]>([]);
     const [inputHistory, setInputHistory] = useSavedState<string[]>('console.inputHistory', []);
     const [historyIndex, setHistoryIndex] = useState<number>(-1);
@@ -129,7 +136,7 @@ export function Console({ onCommand, onDismiss }: { onCommand: (command: string)
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '5px' }} ref={outputRef}>
                 {output.map((line, index) => (
-                    <div key={index} style={{ whiteSpace: 'pre-wrap' }}>{line}</div>
+                    <div key={index} style={{ whiteSpace: 'pre-wrap' }}>{line || '\u00a0'}</div>
                 ))}
             </div>
             <form onSubmit={handleInputSubmit} style={{ display: 'flex', alignItems: 'center', padding: '0 5px', flexShrink: 0 }}>
