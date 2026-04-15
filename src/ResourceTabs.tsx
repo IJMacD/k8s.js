@@ -41,13 +41,13 @@ function AgeCell({ timestamp }: { timestamp: string }) {
   return <td>{timestamp ? age(timestamp) : ''}</td>;
 }
 
-type Tab = 'Deployments' | 'ReplicaSets' | 'Pods' | 'Services' | 'Nodes';
+type Tab = 'Deployments' | 'ReplicaSets' | 'Pods' | 'Services' | 'Nodes' | 'Jobs' | 'CronJobs';
 
-const TABS: Tab[] = ['Deployments', 'ReplicaSets', 'Pods', 'Services', 'Nodes'];
+const TABS: Tab[] = ['Deployments', 'ReplicaSets', 'Pods', 'Services', 'Nodes', 'Jobs', 'CronJobs'];
 
-type Props = Pick<AppState, 'Deployments' | 'ReplicaSets' | 'Pods' | 'Services' | 'Endpoints' | 'Nodes'>;
+type Props = Pick<AppState, 'Deployments' | 'ReplicaSets' | 'Pods' | 'Services' | 'Endpoints' | 'Nodes' | 'Jobs' | 'CronJobs'>;
 
-export function ResourceTabs({ Deployments, ReplicaSets, Pods, Services, Endpoints, Nodes }: Props) {
+export function ResourceTabs({ Deployments, ReplicaSets, Pods, Services, Endpoints, Nodes, Jobs, CronJobs }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('Deployments');
 
   return (
@@ -215,6 +215,75 @@ export function ResourceTabs({ Deployments, ReplicaSets, Pods, Services, Endpoin
                     <td>{n.status.capacity.memory}</td>
                     <td>{podCount}</td>
                     <AgeCell timestamp={n.metadata.creationTimestamp} />
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+        {activeTab === 'Jobs' && (
+          <table className="resource-tabs__table">
+            <thead>
+              <tr>
+                <th>Namespace</th>
+                <th>Name</th>
+                <th>Completions</th>
+                <th>Active</th>
+                <th>Succeeded</th>
+                <th>Failed</th>
+                <th>Status</th>
+                <th>Age</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Jobs.map(j => {
+                const isComplete = j.status.conditions.some(c => c.type === 'Complete' && c.status === 'True');
+                const isFailed   = j.status.conditions.some(c => c.type === 'Failed'   && c.status === 'True');
+                const statusLabel = isComplete ? 'Complete' : isFailed ? 'Failed' : 'Running';
+                return (
+                  <tr key={`${j.metadata.namespace}/${j.metadata.name}`}>
+                    <td>{j.metadata.namespace}</td>
+                    <td>{j.metadata.name}</td>
+                    <td>{j.status.succeeded}/{j.spec.completions}</td>
+                    <td>{j.status.active}</td>
+                    <td>{j.status.succeeded}</td>
+                    <td>{j.status.failed}</td>
+                    <td>{statusLabel}</td>
+                    <AgeCell timestamp={j.metadata.creationTimestamp} />
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+        {activeTab === 'CronJobs' && (
+          <table className="resource-tabs__table">
+            <thead>
+              <tr>
+                <th>Namespace</th>
+                <th>Name</th>
+                <th>Schedule</th>
+                <th>Last Schedule</th>
+                <th>Active</th>
+                <th>Suspend</th>
+                <th>Age</th>
+              </tr>
+            </thead>
+            <tbody>
+              {CronJobs.map(c => {
+                const activeCount = Jobs.filter(
+                  j => j.metadata.ownerCronJob === c.metadata.name &&
+                       !j.status.conditions.some(cond => (cond.type === 'Complete' || cond.type === 'Failed') && cond.status === 'True'),
+                ).length;
+                return (
+                  <tr key={`${c.metadata.namespace}/${c.metadata.name}`}>
+                    <td>{c.metadata.namespace}</td>
+                    <td>{c.metadata.name}</td>
+                    <td>{c.spec.schedule}</td>
+                    <td>{c.status.lastScheduleTime ? c.status.lastScheduleTime.slice(0, 19).replace('T', ' ') : '—'}</td>
+                    <td>{activeCount}</td>
+                    <td>{c.spec.suspend ? 'True' : 'False'}</td>
+                    <AgeCell timestamp={c.metadata.creationTimestamp} />
                   </tr>
                 );
               })}

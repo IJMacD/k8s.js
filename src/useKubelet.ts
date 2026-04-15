@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { ActionDispatch } from "react";
-import type { PodCondition } from "./types/apps/Pod";
+import type { PodCondition } from "./types/v1/Pod";
 import type { AppState, Action } from "./store";
 import { updatePodStatus } from "./store";
 
@@ -72,6 +72,8 @@ export function useKubelet(
 
             // t+3.5s: Running + Ready
             const node = Nodes.find(n => n.metadata.name === pod.spec.nodeName);
+            // Pods with OnFailure or Never restart policy run to completion (Succeeded) after a short delay
+            const isBatch = pod.spec.restartPolicy === "OnFailure" || pod.spec.restartPolicy === "Never";
             timersRef.current.push(setTimeout(() => {
                 const startTime = now();
                 const podIP = node?.spec.podCIDR
@@ -88,6 +90,21 @@ export function useKubelet(
                         { type: "Ready",           status: "True", lastTransitionTime: startTime },
                     ],
                 }));
+                // Batch pods run to completion ~2s after reaching Running
+                if (isBatch) {
+                    timersRef.current.push(setTimeout(() => {
+                        const completionTime = now();
+                        dispatch(updatePodStatus(name, namespace, {
+                            phase: "Succeeded",
+                            conditions: [
+                                { type: "PodScheduled", status: "True", lastTransitionTime: startTime },
+                                { type: "Initialized", status: "True", lastTransitionTime: startTime },
+                                { type: "ContainersReady", status: "False", lastTransitionTime: completionTime },
+                                { type: "Ready", status: "False", lastTransitionTime: completionTime },
+                            ],
+                        }));
+                    }, 2_000));
+                }
             }, 3_500));
         }
     }, [Pods, Nodes, dispatch]);

@@ -10,6 +10,8 @@ import { useKubelet } from './useKubelet';
 import { useStatusController } from './useStatusController';
 import { useEndpointsController } from './useEndpointsController';
 import { useScheduler } from './useScheduler';
+import { useJobController } from './useJobController';
+import { useCronJobController } from './useCronJobController';
 const now = new Date().toISOString();
 function makeNode(name: string, internalIP: string, podCIDR: string) {
   return {
@@ -43,6 +45,8 @@ const initialState: AppState = {
     makeNode('node-2', '192.168.0.2', '10.244.1.0/24'),
     makeNode('node-3', '192.168.0.3', '10.244.2.0/24'),
   ],
+  Jobs: [],
+  CronJobs: [],
 }
 
 function App() {
@@ -55,6 +59,8 @@ function App() {
   useStatusController(store, dispatch);
   useEndpointsController(store, dispatch);
   useScheduler(store, dispatch);
+  useJobController(store, dispatch);
+  useCronJobController(store, dispatch);
 
   function handleCommand(inputLine: string): Promise<string> {
     return command(inputLine, dispatch, store);
@@ -71,6 +77,8 @@ function App() {
           Services={store.Services}
           Endpoints={store.Endpoints}
           Nodes={store.Nodes}
+          Jobs={store.Jobs}
+          CronJobs={store.CronJobs}
         />
       </div>
       <div style={{ display: consoleOpen ? undefined : 'none' }}>

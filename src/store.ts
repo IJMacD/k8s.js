@@ -1,8 +1,9 @@
-import type { Deployment } from "./types/apps/deployment";
-import type { Pod } from "./types/apps/Pod";
-import type { ReplicaSet } from "./types/apps/ReplicaSet";
-import type { Service, Endpoints } from "./types/apps/Service";
-import type { KubeNode } from "./types/apps/Node";
+import type { Deployment } from "./types/apps/v1/Deployment";
+import type { Pod } from "./types/v1/Pod";
+import type { ReplicaSet } from "./types/apps/v1/ReplicaSet";
+import type { Service, Endpoints } from "./types/v1/Service";
+import type { KubeNode } from "./types/v1/Node";
+import type { Job, CronJob } from "./types/batch/v1/Job";
 
 export interface AppState {
     Deployments: Deployment[];
@@ -11,6 +12,8 @@ export interface AppState {
     Services: Service[];
     Endpoints: Endpoints[];
     Nodes: KubeNode[];
+    Jobs: Job[];
+    CronJobs: CronJob[];
 }
 
 const CreateDeploymentType = "CREATE_DEPLOYMENT";
@@ -28,6 +31,10 @@ const UpdateEndpointsType = "UPDATE_ENDPOINTS";
 const CreateNodeType = "CREATE_NODE";
 const UpdateNodeSpecType = "UPDATE_NODE_SPEC";
 const BindPodToNodeType = "BIND_POD_TO_NODE";
+const CreateJobType = "CREATE_JOB";
+const UpdateJobStatusType = "UPDATE_JOB_STATUS";
+const CreateCronJobType = "CREATE_CRONJOB";
+const UpdateCronJobStatusType = "UPDATE_CRONJOB_STATUS";
 
 export type ActionType =
     | typeof CreateDeploymentType
@@ -44,7 +51,11 @@ export type ActionType =
     | typeof UpdateEndpointsType
     | typeof CreateNodeType
     | typeof UpdateNodeSpecType
-    | typeof BindPodToNodeType;
+    | typeof BindPodToNodeType
+    | typeof CreateJobType
+    | typeof UpdateJobStatusType
+    | typeof CreateCronJobType
+    | typeof UpdateCronJobStatusType;
 
 export interface CreateDeploymentAction {
     type: typeof CreateDeploymentType;
@@ -59,8 +70,56 @@ export interface CreatePodAction {
         image: string;
         containerName?: string;
         labels?: Record<string, string>;
+        restartPolicy?: "Always" | "OnFailure" | "Never";
         creationTimestamp: string;
         ownerReplicaSet?: string;
+        ownerJob?: string;
+    };
+}
+
+export interface CreateJobAction {
+    type: typeof CreateJobType;
+    payload: {
+        name: string;
+        namespace: string;
+        image: string;
+        completions: number;
+        parallelism: number;
+        backoffLimit: number;
+        ownerCronJob?: string;
+        creationTimestamp: string;
+    };
+}
+
+export interface UpdateJobStatusAction {
+    type: typeof UpdateJobStatusType;
+    payload: {
+        name: string;
+        namespace: string;
+        patch: Partial<import("./types/batch/v1/Job").JobStatus>;
+    };
+}
+
+export interface CreateCronJobAction {
+    type: typeof CreateCronJobType;
+    payload: {
+        name: string;
+        namespace: string;
+        image: string;
+        schedule: string;
+        completions: number;
+        parallelism: number;
+        backoffLimit: number;
+        creationTimestamp: string;
+    };
+}
+
+export interface UpdateCronJobStatusAction {
+    type: typeof UpdateCronJobStatusType;
+    payload: {
+        name: string;
+        namespace: string;
+        patch: Partial<import("./types/batch/v1/Job").CronJobStatus>;
     };
 }
 
@@ -72,7 +131,7 @@ export interface CreateServiceAction {
         selector: Record<string, string>;
         ports: Array<{ port: number; targetPort: number; protocol?: "TCP" | "UDP" }>;
         clusterIP: string;
-        serviceType: import("./types/apps/Service").ServiceType;
+        serviceType: import("./types/v1/Service").ServiceType;
     };
 }
 
@@ -86,10 +145,10 @@ export function createService(
 
 export interface UpdateEndpointsAction {
     type: typeof UpdateEndpointsType;
-    payload: import("./types/apps/Service").Endpoints;
+    payload: import("./types/v1/Service").Endpoints;
 }
 
-export function updateEndpoints(endpoints: import("./types/apps/Service").Endpoints): UpdateEndpointsAction {
+export function updateEndpoints(endpoints: import("./types/v1/Service").Endpoints): UpdateEndpointsAction {
     return { type: UpdateEndpointsType, payload: endpoints };
 }
 
@@ -112,12 +171,12 @@ export function createNode(
 
 export interface UpdateNodeSpecAction {
     type: typeof UpdateNodeSpecType;
-    payload: { name: string; patch: Partial<import("./types/apps/Node").NodeSpec> };
+    payload: { name: string; patch: Partial<import("./types/v1/Node").NodeSpec> };
 }
 
 export function updateNodeSpec(
     name: string,
-    patch: Partial<import("./types/apps/Node").NodeSpec>,
+    patch: Partial<import("./types/v1/Node").NodeSpec>,
 ): UpdateNodeSpecAction {
     return { type: UpdateNodeSpecType, payload: { name, patch } };
 }
@@ -165,7 +224,67 @@ export type Action =
     | UpdateEndpointsAction
     | CreateNodeAction
     | UpdateNodeSpecAction
-    | BindPodToNodeAction;
+    | BindPodToNodeAction
+    | CreateJobAction
+    | UpdateJobStatusAction
+    | CreateCronJobAction
+    | UpdateCronJobStatusAction;
+
+export function createJob(
+    name: string,
+    spec: { image: string; completions?: number; parallelism?: number; backoffLimit?: number; ownerCronJob?: string },
+    namespace = "default",
+): CreateJobAction {
+    return {
+        type: CreateJobType,
+        payload: {
+            name,
+            namespace,
+            image: spec.image,
+            completions: spec.completions ?? 1,
+            parallelism: spec.parallelism ?? 1,
+            backoffLimit: spec.backoffLimit ?? 6,
+            ownerCronJob: spec.ownerCronJob,
+            creationTimestamp: new Date().toISOString(),
+        },
+    };
+}
+
+export function updateJobStatus(
+    name: string,
+    namespace: string,
+    patch: Partial<import("./types/batch/v1/Job").JobStatus>,
+): UpdateJobStatusAction {
+    return { type: UpdateJobStatusType, payload: { name, namespace, patch } };
+}
+
+export function createCronJob(
+    name: string,
+    spec: { image: string; schedule: string; completions?: number; parallelism?: number; backoffLimit?: number },
+    namespace = "default",
+): CreateCronJobAction {
+    return {
+        type: CreateCronJobType,
+        payload: {
+            name,
+            namespace,
+            image: spec.image,
+            schedule: spec.schedule,
+            completions: spec.completions ?? 1,
+            parallelism: spec.parallelism ?? 1,
+            backoffLimit: spec.backoffLimit ?? 6,
+            creationTimestamp: new Date().toISOString(),
+        },
+    };
+}
+
+export function updateCronJobStatus(
+    name: string,
+    namespace: string,
+    patch: Partial<import("./types/batch/v1/Job").CronJobStatus>,
+): UpdateCronJobStatusAction {
+    return { type: UpdateCronJobStatusType, payload: { name, namespace, patch } };
+}
 
 export interface UpdateReplicaSetStatusAction {
     type: typeof UpdateReplicaSetStatusType;
@@ -198,14 +317,14 @@ export interface UpdatePodStatusAction {
     payload: {
         name: string;
         namespace: string;
-        patch: Partial<import("./types/apps/Pod").PodStatus>;
+        patch: Partial<import("./types/v1/Pod").PodStatus>;
     };
 }
 
 export function updatePodStatus(
     name: string,
     namespace: string,
-    patch: Partial<import("./types/apps/Pod").PodStatus>,
+    patch: Partial<import("./types/v1/Pod").PodStatus>,
 ): UpdatePodStatusAction {
     return { type: UpdatePodStatusType, payload: { name, namespace, patch } };
 }
@@ -284,7 +403,7 @@ export function createDeployment(
 
 export function createPod(
     name: string,
-    spec: { image: string; containerName?: string; labels?: Record<string, string> },
+    spec: { image: string; containerName?: string; labels?: Record<string, string>; restartPolicy?: "Always" | "OnFailure" | "Never"; ownerJob?: string },
     namespace = "default",
     ownerReplicaSet?: string,
 ): CreatePodAction {
@@ -296,6 +415,8 @@ export function createPod(
             image: spec.image,
             containerName: spec.containerName,
             labels: spec.labels,
+            restartPolicy: spec.restartPolicy,
+            ownerJob: spec.ownerJob,
             creationTimestamp: new Date().toISOString(),
             ownerReplicaSet,
         },
@@ -448,7 +569,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
     }
     if (action.type === CreatePodType) {
-        const { name, namespace, image, containerName, labels, creationTimestamp, ownerReplicaSet } = action.payload;
+        const { name, namespace, image, containerName, labels, restartPolicy, creationTimestamp, ownerReplicaSet, ownerJob } = action.payload;
         return {
             ...state,
             Pods: [
@@ -460,15 +581,17 @@ export const reducer = (state: AppState, action: Action): AppState => {
                         uid: crypto.randomUUID(),
                         creationTimestamp,
                         ...(labels && { labels }),
-                        ...(ownerReplicaSet && {
-                            annotations: { ownerReplicaSet },
-                        }),
+                        annotations: {
+                            ...(ownerReplicaSet ? { ownerReplicaSet } : {}),
+                            ...(ownerJob ? { ownerJob } : {}),
+                        },
                     },
                     status: {
                         phase: "Pending",
                     },
                     spec: {
                         containers: [{ name: containerName ?? name, image }],
+                        ...(restartPolicy && { restartPolicy }),
                     },
                 },
             ],
@@ -597,6 +720,97 @@ export const reducer = (state: AppState, action: Action): AppState => {
                 p.metadata.name === podName && p.metadata.namespace === namespace
                     ? { ...p, spec: { ...p.spec, nodeName }, status: { ...p.status, hostIP } }
                     : p
+            ),
+        };
+    }
+    if (action.type === CreateJobType) {
+        const { name, namespace, image, completions, parallelism, backoffLimit, ownerCronJob, creationTimestamp } = action.payload;
+        const job: Job = {
+            metadata: {
+                uid: crypto.randomUUID(),
+                name,
+                namespace,
+                labels: { "job-name": name },
+                annotations: {},
+                creationTimestamp,
+                ...(ownerCronJob && { ownerCronJob }),
+            },
+            spec: {
+                completions,
+                parallelism,
+                backoffLimit,
+                template: {
+                    metadata: { namespace, name, labels: { "job-name": name } },
+                    spec: {
+                        restartPolicy: "Never",
+                        containers: [{ name, image }],
+                    },
+                },
+            },
+            status: {
+                active: 0,
+                succeeded: 0,
+                failed: 0,
+                startTime: creationTimestamp,
+                conditions: [],
+            },
+        };
+        return { ...state, Jobs: [...state.Jobs, job] };
+    }
+    if (action.type === UpdateJobStatusType) {
+        const { name, namespace, patch } = action.payload;
+        return {
+            ...state,
+            Jobs: state.Jobs.map(j =>
+                j.metadata.name === name && j.metadata.namespace === namespace
+                    ? { ...j, status: { ...j.status, ...patch } }
+                    : j,
+            ),
+        };
+    }
+    if (action.type === CreateCronJobType) {
+        const { name, namespace, image, schedule, completions, parallelism, backoffLimit, creationTimestamp } = action.payload;
+        const cj: CronJob = {
+            metadata: {
+                uid: crypto.randomUUID(),
+                name,
+                namespace,
+                labels: {},
+                annotations: {},
+                creationTimestamp,
+            },
+            spec: {
+                schedule,
+                concurrencyPolicy: "Allow",
+                jobTemplate: {
+                    spec: {
+                        completions,
+                        parallelism,
+                        backoffLimit,
+                        template: {
+                            metadata: { namespace, name, labels: { "job-name": name } },
+                            spec: {
+                                restartPolicy: "Never",
+                                containers: [{ name, image }],
+                            },
+                        },
+                    },
+                },
+            },
+            status: {
+                active: [],
+            },
+        };
+        return { ...state, CronJobs: [...state.CronJobs, cj] };
+    }
+    if (action.type === UpdateCronJobStatusType) {
+        const { name, namespace, patch } = action.payload;
+        return {
+            ...state,
+            CronJobs: state.CronJobs.map(c =>
+                c.metadata.name === name && c.metadata.namespace === namespace
+                    ? { ...c, status: { ...c.status, ...patch } }
+                    : c,
             ),
         };
     }

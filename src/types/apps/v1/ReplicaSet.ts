@@ -1,4 +1,4 @@
-import type { PodTemplateSpec } from "./Pod";
+import type { PodTemplateSpec } from "../../v1/Pod";
 
 export interface ReplicaSet {
     metadata: ReplicaSetMetadata;

@@ -1,5 +1,35 @@
 import type { ActionDispatch } from "react";
-import { createDeployment, createPod, scaleDeployment, setDeploymentImage, createService, updateNodeSpec, deletePod, type Action, type AppState } from "./store";
+import { createDeployment, createPod, scaleDeployment, setDeploymentImage, createService, updateNodeSpec, deletePod, createJob, createCronJob, type Action, type AppState } from "./store";
+
+// Splits a command line into tokens, honouring single and double quotes so
+// that values containing spaces (e.g. --schedule='*/1 * * * *') are kept
+// together as one token. Surrounding quotes are stripped from each token.
+function tokenize(input: string): string[] {
+    const tokens: string[] = [];
+    let current = "";
+    let quote: "'" | '"' | null = null;
+    for (let i = 0; i < input.length; i++) {
+        const ch = input[i];
+        if (quote) {
+            if (ch === quote) {
+                quote = null;
+            } else {
+                current += ch;
+            }
+        } else if (ch === "'" || ch === '"') {
+            quote = ch;
+        } else if (ch === " ") {
+            if (current.length > 0) {
+                tokens.push(current);
+                current = "";
+            }
+        } else {
+            current += ch;
+        }
+    }
+    if (current.length > 0) tokens.push(current);
+    return tokens;
+}
 
 export function command(
     inputLine: string,
@@ -7,7 +37,10 @@ export function command(
     state: AppState,
 ): Promise<string> {
     return new Promise((resolve) => {
-        const [command, ...args] = inputLine.trim().toLowerCase().split(" ");
+        const tokens = tokenize(inputLine.trim());
+        // Lowercase only the command verb, not flag values (preserves cron schedules, images, etc.)
+        const command = (tokens[0] ?? "").toLowerCase();
+        const args = tokens.slice(1);
 
         if (command === "") {
             resolve("");
@@ -115,20 +148,106 @@ export function command(
     });
 }
 
+/**
+ * Strips -n / --namespace flags from kubectl args and returns the clean
+ * positional args alongside the resolved namespace.
+ */
+function parseKubectlArgs(rawArgs: string[]): { namespace: string; args: string[] } {
+    let namespace = "default";
+    const args: string[] = [];
+    for (let i = 0; i < rawArgs.length; i++) {
+        const a = rawArgs[i];
+        if ((a === "-n" || a === "--namespace") && rawArgs[i + 1]) {
+            namespace = rawArgs[++i];
+        } else if (a.startsWith("--namespace=")) {
+            namespace = a.slice("--namespace=".length);
+        } else {
+            args.push(a);
+        }
+    }
+    return { namespace, args };
+}
+
 function kubectl(
-    args: string[],
+    rawArgs: string[],
     dispatch: ActionDispatch<[action: Action]>,
     state: AppState,
 ): Promise<string> {
+    const { namespace, args } = parseKubectlArgs(rawArgs);
     if (args[0] === "run") {
         const name = args[1];
 
         if (args[2] === "--image") {
-            dispatch(createPod(name, { image: args[3] }));
+            const image = args[3];
+            const restartFlag = args.find(a => a.startsWith("--restart="));
+            const restartPolicy = restartFlag?.slice("--restart=".length) as "Always" | "OnFailure" | "Never" | undefined;
+            if (state.Pods.some(p => p.metadata.name === name && p.metadata.namespace === namespace))
+                throw Error(`Error from server (AlreadyExists): pods "${name}" already exists`);
+            dispatch(createPod(name, { image, restartPolicy }, namespace));
             return Promise.resolve(`pod/${name} created`);
         } else {
             throw Error("Expecting --image");
         }
+    }
+    if (args[0] === "create" && args[1] === "job") {
+        const name = args[2];
+        if (!name) throw Error("kubectl create job: missing NAME");
+
+        // kubectl create job <name> --from=cronjob/<cron-name>
+        const fromFlag = args.find(a => a.startsWith("--from="));
+        if (fromFlag) {
+            const ref = fromFlag.slice("--from=".length);
+            if (!ref.startsWith("cronjob/")) throw Error("kubectl create job --from: only cronjob/<name> is supported");
+            const cronName = ref.slice("cronjob/".length);
+            const cj = state.CronJobs.find(
+                c => c.metadata.name === cronName && c.metadata.namespace === namespace,
+            );
+            if (!cj) throw Error(`Error from server (NotFound): cronjobs "${cronName}" not found`);
+            if (state.Jobs.some(j => j.metadata.name === name && j.metadata.namespace === namespace))
+                throw Error(`Error from server (AlreadyExists): jobs "${name}" already exists`);
+            const s = cj.spec.jobTemplate.spec;
+            dispatch(createJob(name, {
+                image: s.template.spec.containers[0]?.image ?? "",
+                completions: s.completions,
+                parallelism: s.parallelism,
+                backoffLimit: s.backoffLimit,
+                ownerCronJob: cronName,
+            }, namespace));
+            return Promise.resolve(`job.batch/${name} created`);
+        }
+
+        const imageFlag = args.find(a => a.startsWith("--image="));
+        if (!imageFlag) throw Error("kubectl create job: --image=IMAGE is required (or use --from=cronjob/<name>)");
+        const image = imageFlag.slice("--image=".length);
+
+        const completions = parseInt(args.find(a => a.startsWith("--completions="))?.slice("--completions=".length) ?? "1", 10);
+        const parallelism = parseInt(args.find(a => a.startsWith("--parallelism="))?.slice("--parallelism=".length) ?? "1", 10);
+        const backoffLimit = parseInt(args.find(a => a.startsWith("--backoff-limit="))?.slice("--backoff-limit=".length) ?? "6", 10);
+
+        if (state.Jobs.some(j => j.metadata.name === name && j.metadata.namespace === namespace))
+            throw Error(`Error from server (AlreadyExists): jobs "${name}" already exists`);
+        dispatch(createJob(name, { image, completions, parallelism, backoffLimit }, namespace));
+        return Promise.resolve(`job.batch/${name} created`);
+    }
+    if (args[0] === "create" && args[1] === "cronjob") {
+        const name = args[2];
+        if (!name) throw Error("kubectl create cronjob: missing NAME");
+
+        const imageFlag = args.find(a => a.startsWith("--image="));
+        if (!imageFlag) throw Error("kubectl create cronjob: --image=IMAGE is required");
+        const image = imageFlag.slice("--image=".length);
+
+        const scheduleFlag = args.find(a => a.startsWith("--schedule="));
+        if (!scheduleFlag) throw Error("kubectl create cronjob: --schedule=CRON is required (e.g. --schedule='*/1 * * * *')");
+        const schedule = scheduleFlag.slice("--schedule=".length);
+
+        const completions = parseInt(args.find(a => a.startsWith("--completions="))?.slice("--completions=".length) ?? "1", 10);
+        const parallelism = parseInt(args.find(a => a.startsWith("--parallelism="))?.slice("--parallelism=".length) ?? "1", 10);
+
+        if (state.CronJobs.some(c => c.metadata.name === name && c.metadata.namespace === namespace))
+            throw Error(`Error from server (AlreadyExists): cronjobs "${name}" already exists`);
+        dispatch(createCronJob(name, { image, schedule, completions, parallelism }, namespace));
+        return Promise.resolve(`cronjob.batch/${name} created`);
     }
     if (args[0] === "create" && args[1] === "deployment") {
         const name = args[2];
@@ -141,7 +260,9 @@ function kubectl(
         const replicasFlag = args.find(a => a.startsWith("--replicas="));
         const replicas = replicasFlag ? parseInt(replicasFlag.slice("--replicas=".length), 10) : 1;
 
-        dispatch(createDeployment(name, { image, replicas }));
+        if (state.Deployments.some(d => d.metadata.name === name && d.metadata.namespace === namespace))
+            throw Error(`Error from server (AlreadyExists): deployments "${name}" already exists`);
+        dispatch(createDeployment(name, { image, replicas }, namespace));
         return Promise.resolve(`deployment.apps/${name} created`);
     }
     if (args[0] === "set" && args[1] === "image") {
@@ -161,7 +282,7 @@ function kubectl(
         if (!container || !image)
             throw Error("kubectl set image: expected <container>=<image>");
 
-        dispatch(setDeploymentImage(deploymentName, container, image));
+        dispatch(setDeploymentImage(deploymentName, container, image, namespace));
         return Promise.resolve(`deployment.apps/${deploymentName} image updated`);
     }
     if (args[0] === "scale") {
@@ -180,7 +301,7 @@ function kubectl(
         }
         if (!resourceName) throw Error("kubectl scale: specify deployment/NAME or deployment NAME");
 
-        dispatch(scaleDeployment(resourceName, replicas));
+        dispatch(scaleDeployment(resourceName, replicas, namespace));
         return Promise.resolve(`deployment.apps/${resourceName} scaled`);
     }
     if (args[0] === "expose") {
@@ -189,7 +310,7 @@ function kubectl(
         const name = args[2];
         if (!name) throw Error("kubectl expose: missing deployment name");
 
-        const exists = state.Deployments.find(d => d.metadata.name === name);
+        const exists = state.Deployments.find(d => d.metadata.name === name && d.metadata.namespace === namespace);
         if (!exists) throw Error(`Error from server (NotFound): deployments "${name}" not found`);
 
         const portFlag = args.find(a => a.startsWith("--port="));
@@ -201,7 +322,7 @@ function kubectl(
         const targetPort = targetPortFlag ? parseInt(targetPortFlag.slice("--target-port=".length), 10) : port;
 
         const typeFlag = args.find(a => a.startsWith("--type="));
-        const serviceType = (typeFlag?.slice("--type=".length) ?? "ClusterIP") as import("./types/apps/Service").ServiceType;
+        const serviceType = (typeFlag?.slice("--type=".length) ?? "ClusterIP") as import("./types/v1/Service").ServiceType;
 
         const svcNameFlag = args.find(a => a.startsWith("--name="));
         const svcName = svcNameFlag?.slice("--name=".length) ?? name;
@@ -214,7 +335,7 @@ function kubectl(
             ports: [{ port, targetPort }],
             clusterIP,
             serviceType,
-        }));
+        }, namespace));
         return Promise.resolve(`service/${svcName} exposed`);
     }
     if (args[0] === "cordon" || args[0] === "uncordon") {
@@ -249,12 +370,63 @@ function kubectl(
         const resourceArg = args[1];
         if (!resourceArg) throw Error("kubectl describe: specify a resource (e.g. pod/<name>)");
 
-        const namespace = (() => {
-            const idx = args.indexOf("-n");
-            if (idx !== -1) return args[idx + 1] ?? "default";
-            const flag = args.find(a => a.startsWith("--namespace="));
-            return flag ? flag.slice("--namespace=".length) : "default";
-        })();
+        if (resourceArg.startsWith("job/") || args[1] === "job") {
+            const name = resourceArg.includes("/") ? resourceArg.slice(resourceArg.indexOf("/") + 1) : args[2];
+            if (!name) throw Error("kubectl describe job: missing job name");
+            const job = state.Jobs.find(j => j.metadata.name === name && j.metadata.namespace === namespace);
+            if (!job) throw Error(`Error from server (NotFound): jobs "${name}" not found`);
+            const isComplete = job.status.conditions.some(c => c.type === "Complete" && c.status === "True");
+            const isFailed = job.status.conditions.some(c => c.type === "Failed" && c.status === "True");
+            const lines = [
+                `Name:               ${job.metadata.name}`,
+                `Namespace:          ${job.metadata.namespace}`,
+                `Labels:             ${Object.entries(job.metadata.labels).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
+                ...(job.metadata.ownerCronJob ? [`Controlled By:      CronJob/${job.metadata.ownerCronJob}`] : []),
+                `Completions:        ${job.status.succeeded}/${job.spec.completions}`,
+                `Parallelism:        ${job.spec.parallelism}`,
+                `Backoff Limit:      ${job.spec.backoffLimit}`,
+                `Start Time:         ${job.status.startTime ?? "<none>"}`,
+                ...(job.status.completionTime ? [`Completion Time:    ${job.status.completionTime}`] : []),
+                ``,
+                `Pods Statuses:    ${job.status.active} Active / ${job.status.succeeded} Succeeded / ${job.status.failed} Failed`,
+                ``,
+                `Conditions:`,
+                `  Type     Status`,
+                ...(job.status.conditions.length
+                    ? job.status.conditions.map(c => `  ${c.type.padEnd(8)} ${c.status}`)
+                    : [`  <none>`]),
+                ``,
+                `Status:           ${isComplete ? "Complete" : isFailed ? "Failed" : "Running"}`,
+            ];
+            return Promise.resolve(lines.join("\n"));
+        }
+
+        if (resourceArg.startsWith("cronjob/") || args[1] === "cronjob") {
+            const name = resourceArg.includes("/") ? resourceArg.slice(resourceArg.indexOf("/") + 1) : args[2];
+            if (!name) throw Error("kubectl describe cronjob: missing cronjob name");
+            const cj = state.CronJobs.find(c => c.metadata.name === name && c.metadata.namespace === namespace);
+            if (!cj) throw Error(`Error from server (NotFound): cronjobs "${name}" not found`);
+            const activeJobs = state.Jobs.filter(
+                j => j.metadata.ownerCronJob === name &&
+                    !j.status.conditions.some(c => c.type === "Complete" && c.status === "True") &&
+                    !j.status.conditions.some(c => c.type === "Failed" && c.status === "True"),
+            );
+            const lines = [
+                `Name:                          ${cj.metadata.name}`,
+                `Namespace:                     ${cj.metadata.namespace}`,
+                `Schedule:                      ${cj.spec.schedule}`,
+                `Concurrency Policy:            ${cj.spec.concurrencyPolicy ?? "Allow"}`,
+                `Suspend:                       ${cj.spec.suspend ?? false}`,
+                `Last Schedule Time:            ${cj.status.lastScheduleTime ?? "<none>"}`,
+                `Active Jobs:                   ${activeJobs.length > 0 ? activeJobs.map(j => j.metadata.name).join(", ") : "<none>"}`,
+                ``,
+                `Job Template:`,
+                `  Completions:  ${cj.spec.jobTemplate.spec.completions}`,
+                `  Parallelism:  ${cj.spec.jobTemplate.spec.parallelism}`,
+                `  Image:        ${cj.spec.jobTemplate.spec.template.spec.containers[0]?.image ?? "<none>"}`,
+            ];
+            return Promise.resolve(lines.join("\n"));
+        }
 
         if (resourceArg.startsWith("pod/") || args[1] === "pod") {
             const name = resourceArg.startsWith("pod/")
