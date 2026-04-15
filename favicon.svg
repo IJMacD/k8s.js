@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="k8s.js logo">
+  <circle cx="100" cy="100" r="92" fill="#326CE5"/>
+  <circle cx="100" cy="100" r="78" fill="none" stroke="white" stroke-width="7"/>
+  <g stroke="white" stroke-width="5" stroke-linecap="round">
+    <line x1="100" y1="29" x2="100" y2="72" transform="rotate(0,   100, 100)"/>
+    <line x1="100" y1="29" x2="100" y2="72" transform="rotate(51.43,  100, 100)"/>
+    <line x1="100" y1="29" x2="100" y2="72" transform="rotate(102.86, 100, 100)"/>
+    <line x1="100" y1="29" x2="100" y2="72" transform="rotate(154.29, 100, 100)"/>
+    <line x1="100" y1="29" x2="100" y2="72" transform="rotate(205.71, 100, 100)"/>
+    <line x1="100" y1="29" x2="100" y2="72" transform="rotate(257.14, 100, 100)"/>
+    <line x1="100" y1="29" x2="100" y2="72" transform="rotate(308.57, 100, 100)"/>
+  </g>
+  <g fill="white">
+    <circle cx="100" cy="22" r="6" transform="rotate(0,   100, 100)"/>
+    <circle cx="100" cy="22" r="6" transform="rotate(51.43,  100, 100)"/>
+    <circle cx="100" cy="22" r="6" transform="rotate(102.86, 100, 100)"/>
+    <circle cx="100" cy="22" r="6" transform="rotate(154.29, 100, 100)"/>
+    <circle cx="100" cy="22" r="6" transform="rotate(205.71, 100, 100)"/>
+    <circle cx="100" cy="22" r="6" transform="rotate(257.14, 100, 100)"/>
+    <circle cx="100" cy="22" r="6" transform="rotate(308.57, 100, 100)"/>
+  </g>
+  <circle cx="100" cy="100" r="55" fill="#F7DF1E"/>
+  <text
+    x="100" y="116"
+    text-anchor="middle"
+    font-family="Arial Black, 'Helvetica Neue', sans-serif"
+    font-weight="900"
+    font-size="40"
+    fill="#323330"
+  >JS</text>
+</svg>
