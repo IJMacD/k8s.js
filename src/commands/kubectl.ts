@@ -21,11 +21,11 @@ function parseKubectlArgs(rawArgs: string[]): { namespace: string; args: string[
     return { namespace, args };
 }
 
-export function kubectl(
+export async function* kubectl(
     rawArgs: string[],
     dispatch: ActionDispatch<[action: Action]>,
     getState: () => AppState,
-): Promise<string> {
+): AsyncGeneratornerator<string> {
     const state = getState();
     const { namespace, args } = parseKubectlArgs(rawArgs);
     if (args[0] === "run") {
@@ -38,7 +38,7 @@ export function kubectl(
             if (state.Pods.some(p => p.metadata.name === name && p.metadata.namespace === namespace))
                 throw Error(`Error from server (AlreadyExists): pods "${name}" already exists`);
             dispatch(createPod(name, { image, restartPolicy }, namespace));
-            return Promise.resolve(`pod/${name} created`);
+            yield `pod/${name} created`; return;
         } else {
             throw Error("Expecting --image");
         }
@@ -66,7 +66,7 @@ export function kubectl(
                 parallelism: s.parallelism,
                 backoffLimit: s.backoffLimit,
             }, namespace, { kind: "CronJob", apiVersion: "batch/v1", name: cronName, uid: cj.metadata.uid }));
-            return Promise.resolve(`job.batch/${name} created`);
+            yield `job.batch/${name} created`; return;
         }
 
         const imageFlag = args.find(a => a.startsWith("--image="));
@@ -80,7 +80,7 @@ export function kubectl(
         if (state.Jobs.some(j => j.metadata.name === name && j.metadata.namespace === namespace))
             throw Error(`Error from server (AlreadyExists): jobs "${name}" already exists`);
         dispatch(createJob(name, { image, completions, parallelism, backoffLimit }, namespace));
-        return Promise.resolve(`job.batch/${name} created`);
+        yield `job.batch/${name} created`; return;
     }
     if (args[0] === "create" && args[1] === "cronjob") {
         const name = args[2];
@@ -100,7 +100,7 @@ export function kubectl(
         if (state.CronJobs.some(c => c.metadata.name === name && c.metadata.namespace === namespace))
             throw Error(`Error from server (AlreadyExists): cronjobs "${name}" already exists`);
         dispatch(createCronJob(name, { image, schedule, completions, parallelism }, namespace));
-        return Promise.resolve(`cronjob.batch/${name} created`);
+        yield `cronjob.batch/${name} created`; return;
     }
     if (args[0] === "create" && args[1] === "daemonset") {
         const name = args[2];
@@ -113,7 +113,7 @@ export function kubectl(
         if (state.DaemonSets.some(ds => ds.metadata.name === name && ds.metadata.namespace === namespace))
             throw Error(`Error from server (AlreadyExists): daemonsets "${name}" already exists`);
         dispatch(createDaemonSet(name, { image }, namespace));
-        return Promise.resolve(`daemonset.apps/${name} created`);
+        yield `daemonset.apps/${name} created`; return;
     }
     if (args[0] === "create" && args[1] === "deployment") {
         const name = args[2];
@@ -129,7 +129,7 @@ export function kubectl(
         if (state.Deployments.some(d => d.metadata.name === name && d.metadata.namespace === namespace))
             throw Error(`Error from server (AlreadyExists): deployments "${name}" already exists`);
         dispatch(createDeployment(name, { image, replicas }, namespace));
-        return Promise.resolve(`deployment.apps/${name} created`);
+        yield `deployment.apps/${name} created`; return;
     }
     if (args[0] === "set" && args[1] === "image") {
         // kubectl set image deployment/<name> <container>=<image>
@@ -149,7 +149,7 @@ export function kubectl(
             throw Error("kubectl set image: expected <container>=<image>");
 
         dispatch(setDeploymentImage(deploymentName, container, image, namespace));
-        return Promise.resolve(`deployment.apps/${deploymentName} image updated`);
+        yield `deployment.apps/${deploymentName} image updated`; return;
     }
     if (args[0] === "scale") {
         const replicasFlag = args.find(a => a.startsWith("--replicas="));
@@ -168,7 +168,7 @@ export function kubectl(
         if (!resourceName) throw Error("kubectl scale: specify deployment/NAME or deployment NAME");
 
         dispatch(scaleDeployment(resourceName, replicas, namespace));
-        return Promise.resolve(`deployment.apps/${resourceName} scaled`);
+        yield `deployment.apps/${resourceName} scaled`; return;
     }
     if (args[0] === "expose") {
         // kubectl expose deployment <name> --port=80 [--target-port=8080] [--type=ClusterIP]
@@ -205,7 +205,7 @@ export function kubectl(
             clusterIP,
             serviceType,
         }, namespace));
-        return Promise.resolve(`service/${svcName} exposed`);
+        yield `service/${svcName} exposed`; return;
     }
     if (args[0] === "cordon" || args[0] === "uncordon") {
         const name = args[1];
@@ -214,7 +214,7 @@ export function kubectl(
         if (!node) throw Error(`Error from server (NotFound): nodes "${name}" not found`);
         const unschedulable = args[0] === "cordon";
         dispatch(updateNodeSpec(name, { unschedulable }));
-        return Promise.resolve(`node/${name} ${unschedulable ? "cordoned" : "uncordoned"}`);
+        yield `node/${name} ${unschedulable ? "cordoned" : "uncordoned"}`; return;
     }
     if (args[0] === "drain") {
         const name = args[1];
@@ -228,12 +228,12 @@ export function kubectl(
         for (const pod of nodePods) {
             dispatch(deletePod(pod.metadata.name, pod.metadata.namespace));
         }
-        return Promise.resolve(
+        yield (
             `node/${name} cordoned\n` +
             nodePods.map(p => `pod/${p.metadata.name} evicted`).join("\n") +
             (nodePods.length ? "\n" : "") +
             `node/${name} drained`
-        );
+        ); return;
     }
     if (args[0] === "get") {
         const allNs = rawArgs.includes("-A") || rawArgs.includes("--all-namespaces");
@@ -482,7 +482,7 @@ export function kubectl(
         for (const { type, name } of entries) {
             sections.push(renderGet(type, name));
         }
-        return Promise.resolve(sections.join("\n\n"));
+        yield sections.join("\n\n"); return;
     }
     if (args[0] === "rollout") {
         const subCmd = args[1];
@@ -520,28 +520,39 @@ export function kubectl(
                     dep.status.availableReplicas >= dep.spec.replicas;
             };
 
-            if (noWatch || !getState) {
-                if (isComplete(state)) return Promise.resolve(`deployment "${name}" successfully rolled out`);
-                return Promise.resolve(`Waiting for deployment "${name}" rollout to finish: ${d.status.readyReplicas} of ${d.spec.replicas} updated replicas are available...`);
+            if (noWatch) {
+                if (isComplete(state)) {
+                    yield `deployment "${name}" successfully rolled out`; return;
+                }
+                yield `Waiting for deployment "${name}" rollout to finish: ${d.status.readyReplicas} of ${d.spec.replicas} updated replicas are available...`; return;
             }
 
-            // Poll live state until rollout is complete or timeout
-            return new Promise<string>((resolve, reject) => {
-                const deadline = Date.now() + timeoutMs;
-                const interval = setInterval(() => {
-                    const current = getState!();
-                    if (isComplete(current)) {
-                        clearInterval(interval);
-                        resolve(`deployment "${name}" successfully rolled out`);
-                    } else if (Date.now() >= deadline) {
-                        clearInterval(interval);
-                        const dep = current.Deployments.find(
-                            dep => dep.metadata.name === name && dep.metadata.namespace === namespace,
-                        );
-                        reject(new Error(`error: timed out waiting for the condition on deployments/${name}\n(${dep?.status.readyReplicas ?? 0}/${dep?.spec.replicas ?? 0} replicas available)`));
-                    }
-                }, 500);
-            });
+            // Poll live state; only yield a line when the status message changes (matches real kubectl behaviour)
+            const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+            const deadline = Date.now() + timeoutMs;
+            let lastLine = '';
+            while (true) {
+                const current = getState();
+                if (isComplete(current)) {
+                    yield `deployment "${name}" successfully rolled out`;
+                    return;
+                }
+                if (Date.now() >= deadline) {
+                    const dep = current.Deployments.find(
+                        dep => dep.metadata.name === name && dep.metadata.namespace === namespace,
+                    );
+                    throw new Error(`error: timed out waiting for the condition on deployments/${name}\n(${dep?.status.readyReplicas ?? 0}/${dep?.spec.replicas ?? 0} replicas available)`);
+                }
+                const dep = current.Deployments.find(
+                    dep => dep.metadata.name === name && dep.metadata.namespace === namespace,
+                );
+                const line = `Waiting for deployment "${name}" rollout to finish: ${dep?.status.readyReplicas ?? 0}/${dep?.spec.replicas ?? 0} updated replicas are available...`;
+                if (line !== lastLine) {
+                    yield line;
+                    lastLine = line;
+                }
+                await sleep(500);
+            }
         }
 
         if (subCmd === "undo") {
@@ -592,7 +603,7 @@ export function kubectl(
                 `Update Strategy: ${ds.spec.updateStrategy.type}`,
                 `Events:  <none>`,
             ];
-            return Promise.resolve(lines.join("\n"));
+            yield lines.join("\n"); return;
         }
 
         if (resourceArg.startsWith("deployment/") || resourceArg.startsWith("deploy/") || args[1] === "deployment" || args[1] === "deploy") {
@@ -645,7 +656,7 @@ export function kubectl(
                 `NewReplicaSet:   ${currentRS ? `${currentRS.metadata.name} (${currentRS.status.replicas}/${currentRS.spec.replicas} replicas created)` : "<none>"}`,
                 `Events:          <none>`,
             ];
-            return Promise.resolve(lines.join("\n"));
+            yield lines.join("\n"); return;
         }
 
         if (resourceArg.startsWith("replicaset/") || resourceArg.startsWith("rs/") || args[1] === "replicaset" || args[1] === "rs") {
@@ -686,7 +697,7 @@ export function kubectl(
                 `  ReplicaFailure   False`,
                 `Events:  <none>`,
             ];
-            return Promise.resolve(lines.join("\n"));
+            yield lines.join("\n"); return;
         }
 
         if (resourceArg.startsWith("job/") || args[1] === "job") {
@@ -731,7 +742,7 @@ export function kubectl(
                 ``,
                 `Events:  <none>`,
             ];
-            return Promise.resolve(lines.join("\n"));
+            yield lines.join("\n"); return;
         }
 
         if (resourceArg.startsWith("cronjob/") || args[1] === "cronjob") {
@@ -776,7 +787,7 @@ export function kubectl(
                 ``,
                 `Events:  <none>`,
             ];
-            return Promise.resolve(lines.join("\n"));
+            yield lines.join("\n"); return;
         }
 
         if (resourceArg.startsWith("pod/") || args[1] === "pod") {
@@ -882,7 +893,7 @@ export function kubectl(
                 ``,
                 ...podEvents(),
             ];
-            return Promise.resolve(lines.join("\n"));
+            yield lines.join("\n"); return;
         }
 
         if (resourceArg.startsWith("service/") || resourceArg.startsWith("svc/") || args[1] === "service" || args[1] === "svc") {
@@ -914,7 +925,7 @@ export function kubectl(
                 `Session Affinity:         None`,
                 `Events:                   <none>`,
             ];
-            return Promise.resolve(lines.join("\n"));
+            yield lines.join("\n"); return;
         }
 
         if (resourceArg.startsWith("node/") || args[1] === "node") {
@@ -961,7 +972,7 @@ export function kubectl(
                 ``,
                 `Events:  <none>`,
             ];
-            return Promise.resolve(lines.join("\n"));
+            yield lines.join("\n"); return;
         }
 
         throw Error(`kubectl describe: unsupported resource type "${resourceArg.split("/")[0]}"`);
@@ -1084,7 +1095,7 @@ export function kubectl(
                 }
             }
         }
-        return Promise.resolve(lines.join("\n") || "No resources deleted.");
+        yield lines.join("\n") || "No resources deleted."; return;
     }
     throw Error(`kubectl: Unknown subcommand ${args[0]}`);
 }

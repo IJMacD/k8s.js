@@ -9,7 +9,7 @@ import { useSavedState } from "../hooks/useSavedState";
 const PROMPT = '> ';
 const PROMPT_CONT = '  '; // continuation prompt, same width as PROMPT
 
-export function Console({ onCommand, onDismiss }: { onCommand: (command: string) => Promise<string>; onDismiss?: () => void }) {
+export function Console({ onCommand, onDismiss }: { onCommand: (command: string) => AsyncGenerator<string>; onDismiss?: () => void }) {
     const [input, setInput] = useState('');
     const [output, setOutput] = useState<string[]>([
         'Welcome to k8s.js! Try a few commands to get started:',
@@ -69,21 +69,24 @@ export function Console({ onCommand, onDismiss }: { onCommand: (command: string)
     // so the effect would fire again mid-command whenever App re-renders (e.g. during rollout polling).
     const processingRef = useRef(false);
 
-    // Process commands from the input queue
-    // Wait for the onCommand promise to resolve before processing the next command in the queue
+    // Process commands from the input queue one at a time.
+    // Uses for-await-of so commands can yield multiple lines incrementally.
     useEffect(() => {
         if (inputQueue.length > 0 && !processingRef.current) {
             processingRef.current = true;
-            const command = inputQueue[0];
-            onCommand(command).then((result) => {
-                processingRef.current = false;
-                setOutput((prevOutput) => [...prevOutput, result]);
-                setInputQueue((prevQueue) => prevQueue.slice(1)); // Remove the processed command from the queue
-            }).catch((e) => {
-                processingRef.current = false;
-                setOutput(prevOutput => [...prevOutput, e.message])
-                setInputQueue(prevQueue => prevQueue.slice(1))
-            });
+            const cmd = inputQueue[0];
+            (async () => {
+                try {
+                    for await (const line of onCommand(cmd)) {
+                        setOutput(prev => [...prev, line]);
+                    }
+                } catch (e) {
+                    setOutput(prev => [...prev, (e as Error).message]);
+                } finally {
+                    processingRef.current = false;
+                    setInputQueue(prev => prev.slice(1));
+                }
+            })();
         }
     }, [inputQueue, onCommand]);
 

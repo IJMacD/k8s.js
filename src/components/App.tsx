@@ -67,7 +67,7 @@ function App() {
   // eslint-disable-next-line react-hooks/refs
   storeRef.current = store;
 
-  function handleCommand(inputLine: string): Promise<string> {
+  function handleCommand(inputLine: string): AsyncGenerator<string> {
     return command(inputLine, dispatch, () => storeRef.current);
   }
 

@@ -34,43 +34,35 @@ function tokenize(input: string): string[] {
     return tokens;
 }
 
-export function command(
+export async function* command(
     inputLine: string,
     dispatch: ActionDispatch<[action: Action]>,
     getState: () => AppState,
-): Promise<string> {
-    return new Promise((resolve) => {
-        const tokens = tokenize(inputLine.trim());
-        // Lowercase only the command verb, not flag values (preserves cron schedules, images, etc.)
-        const command = (tokens[0] ?? "").toLowerCase();
-        const args = tokens.slice(1);
+): AsyncGenerator<string> {
+    const tokens = tokenize(inputLine.trim());
+    // Lowercase only the command verb, not flag values (preserves cron schedules, images, etc.)
+    const command = (tokens[0] ?? "").toLowerCase();
+    const args = tokens.slice(1);
 
-        if (command === "") {
-            resolve("");
-            return;
-        } else if (command === "help") {
-            resolve("Available commands: help, echo [message], date");
-            return;
-        } else if (command === "echo") {
-            const message = args.join(" ");
-            resolve(message);
-            return;
-        } else if (command === "date") {
-            if (args[0] === "--iso") {
-                resolve(new Date().toISOString());
-                return;
-            }
-            resolve(new Date().toString());
-            return;
-        } else if (command === "ping") {
-            resolve(ping(args, getState()));
-        } else if (command === "curl") {
-            resolve(curl(args, getState()));
-        } else if (command === "kubectl") {
-            resolve(kubectl(args, dispatch, getState));
+    if (command === "") {
+        return;
+    } else if (command === "help") {
+        yield "Available commands: help, echo [message], date";
+    } else if (command === "echo") {
+        yield args.join(" ");
+    } else if (command === "date") {
+        if (args[0] === "--iso") {
+            yield new Date().toISOString();
         } else {
-            resolve(`Unknown command: ${command}`);
-            return;
+            yield new Date().toString();
         }
-    });
+    } else if (command === "ping") {
+        yield ping(args, getState());
+    } else if (command === "curl") {
+        yield curl(args, getState());
+    } else if (command === "kubectl") {
+        yield* kubectl(args, dispatch, getState);
+    } else {
+        yield `Unknown command: ${command}`;
+    }
 }
