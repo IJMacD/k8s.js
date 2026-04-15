@@ -42,10 +42,8 @@ export function useScheduler(
                 return count < bestCount ? node : best;
             });
 
-            const hostIP = chosen.status.addresses.find(a => a.type === "InternalIP")?.address ?? "0.0.0.0";
-
             timersRef.current.push(setTimeout(() => {
-                dispatch(bindPodToNode(pod.metadata.name, pod.metadata.namespace, chosen.metadata.name, hostIP));
+                dispatch(bindPodToNode(pod.metadata.name, pod.metadata.namespace, chosen.metadata.name));
             }, SCHEDULE_DELAY_MS));
         }
     }, [Pods, Nodes, dispatch]);

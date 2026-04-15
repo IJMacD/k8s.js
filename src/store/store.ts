@@ -1,6 +1,7 @@
 import type { Deployment } from "../types/apps/v1/Deployment";
 import type { Pod } from "../types/v1/Pod";
 import type { ReplicaSet } from "../types/apps/v1/ReplicaSet";
+import type { DaemonSet } from "../types/apps/v1/DaemonSet";
 import type { Service, Endpoints } from "../types/v1/Service";
 import type { KubeNode } from "../types/v1/Node";
 import type { Job, CronJob } from "../types/batch/v1/Job";
@@ -9,6 +10,7 @@ import type { OwnerReference } from "../types/v1/ObjectMeta";
 export interface AppState {
     Deployments: Deployment[];
     ReplicaSets: ReplicaSet[];
+    DaemonSets: DaemonSet[];
     Pods: Pod[];
     Services: Service[];
     Endpoints: Endpoints[];
@@ -41,6 +43,9 @@ const DeleteReplicaSetType = "DELETE_REPLICASET";
 const DeleteServiceType = "DELETE_SERVICE";
 const DeleteJobType = "DELETE_JOB";
 const DeleteCronJobType = "DELETE_CRONJOB";
+const CreateDaemonSetType = "CREATE_DAEMONSET";
+const DeleteDaemonSetType = "DELETE_DAEMONSET";
+const UpdateDaemonSetStatusType = "UPDATE_DAEMONSET_STATUS";
 
 export type ActionType =
     | typeof CreateDeploymentType
@@ -66,7 +71,10 @@ export type ActionType =
     | typeof DeleteReplicaSetType
     | typeof DeleteServiceType
     | typeof DeleteJobType
-    | typeof DeleteCronJobType;
+    | typeof DeleteCronJobType
+    | typeof CreateDaemonSetType
+    | typeof DeleteDaemonSetType
+    | typeof UpdateDaemonSetStatusType;
 
 export interface CreateDeploymentAction {
     type: typeof CreateDeploymentType;
@@ -83,8 +91,23 @@ export interface CreatePodAction {
         ports?: Array<{ containerPort: number }>;
         labels?: Record<string, string>;
         restartPolicy?: "Always" | "OnFailure" | "Never";
+        nodeName?: string;
         creationTimestamp: string;
         ownerReferences?: OwnerReference[];
+    };
+}
+
+export interface CreateDaemonSetAction {
+    type: typeof CreateDaemonSetType;
+    payload: { name: string; namespace: string; image: string };
+}
+
+export interface UpdateDaemonSetStatusAction {
+    type: typeof UpdateDaemonSetStatusType;
+    payload: {
+        name: string;
+        namespace: string;
+        patch: Partial<import("../types/apps/v1/DaemonSet").DaemonSetStatus>;
     };
 }
 
@@ -194,16 +217,15 @@ export function updateNodeSpec(
 
 export interface BindPodToNodeAction {
     type: typeof BindPodToNodeType;
-    payload: { podName: string; namespace: string; nodeName: string; hostIP: string };
+    payload: { podName: string; namespace: string; nodeName: string };
 }
 
 export function bindPodToNode(
     podName: string,
     namespace: string,
     nodeName: string,
-    hostIP: string,
 ): BindPodToNodeAction {
-    return { type: BindPodToNodeType, payload: { podName, namespace, nodeName, hostIP } };
+    return { type: BindPodToNodeType, payload: { podName, namespace, nodeName } };
 }
 
 export interface SetDeploymentImageAction {
@@ -244,7 +266,10 @@ export type Action =
     | { type: typeof DeleteReplicaSetType; payload: { name: string; namespace: string } }
     | { type: typeof DeleteServiceType; payload: { name: string; namespace: string } }
     | { type: typeof DeleteJobType; payload: { name: string; namespace: string } }
-    | { type: typeof DeleteCronJobType; payload: { name: string; namespace: string } };
+    | { type: typeof DeleteCronJobType; payload: { name: string; namespace: string } }
+    | CreateDaemonSetAction
+    | UpdateDaemonSetStatusAction
+    | { type: typeof DeleteDaemonSetType; payload: { name: string; namespace: string } };
 
 export function deleteDeployment(name: string, namespace = "default") {
     return { type: DeleteDeploymentType as typeof DeleteDeploymentType, payload: { name, namespace } };
@@ -260,6 +285,26 @@ export function deleteJob(name: string, namespace = "default") {
 }
 export function deleteCronJob(name: string, namespace = "default") {
     return { type: DeleteCronJobType as typeof DeleteCronJobType, payload: { name, namespace } };
+}
+
+export function createDaemonSet(
+    name: string,
+    spec: { image: string },
+    namespace = "default",
+): CreateDaemonSetAction {
+    return { type: CreateDaemonSetType, payload: { name, namespace, image: spec.image } };
+}
+
+export function deleteDaemonSet(name: string, namespace = "default") {
+    return { type: DeleteDaemonSetType as typeof DeleteDaemonSetType, payload: { name, namespace } };
+}
+
+export function updateDaemonSetStatus(
+    name: string,
+    namespace: string,
+    patch: Partial<import("../types/apps/v1/DaemonSet").DaemonSetStatus>,
+): UpdateDaemonSetStatusAction {
+    return { type: UpdateDaemonSetStatusType, payload: { name, namespace, patch } };
 }
 
 export function createJob(
@@ -438,7 +483,7 @@ export function createDeployment(
 
 export function createPod(
     name: string,
-    spec: { image: string; containerName?: string; ports?: Array<{ containerPort: number }>; labels?: Record<string, string>; restartPolicy?: "Always" | "OnFailure" | "Never" },
+    spec: { image: string; containerName?: string; ports?: Array<{ containerPort: number }>; labels?: Record<string, string>; restartPolicy?: "Always" | "OnFailure" | "Never"; nodeName?: string },
     namespace = "default",
     ownerRef?: { kind: string; apiVersion: string; name: string; uid: string },
 ): CreatePodAction {
@@ -452,6 +497,7 @@ export function createPod(
             ports: spec.ports,
             labels: spec.labels,
             restartPolicy: spec.restartPolicy,
+            nodeName: spec.nodeName,
             creationTimestamp: new Date().toISOString(),
             ownerReferences: ownerRef
                 ? [{ ...ownerRef, controller: true, blockOwnerDeletion: true }]
@@ -607,7 +653,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
     }
     if (action.type === CreatePodType) {
-        const { name, namespace, image, containerName, ports, labels, restartPolicy, creationTimestamp, ownerReferences } = action.payload;
+        const { name, namespace, image, containerName, ports, labels, restartPolicy, nodeName, creationTimestamp, ownerReferences } = action.payload;
         return {
             ...state,
             Pods: [
@@ -627,9 +673,62 @@ export const reducer = (state: AppState, action: Action): AppState => {
                     spec: {
                         containers: [{ name: containerName ?? name, image, ...(ports && { ports }) }],
                         ...(restartPolicy && { restartPolicy }),
+                        ...(nodeName && { nodeName }),
                     },
                 },
             ],
+        };
+    }
+    if (action.type === CreateDaemonSetType) {
+        const { name, namespace, image } = action.payload;
+        const creationTimestamp = new Date().toISOString();
+        const ds: DaemonSet = {
+            metadata: {
+                uid: crypto.randomUUID(),
+                name,
+                namespace,
+                labels: { app: name },
+                annotations: {},
+                creationTimestamp,
+                generation: 1,
+            },
+            spec: {
+                selector: { matchLabels: { app: name } },
+                template: {
+                    metadata: { name, namespace, labels: { app: name } },
+                    spec: { containers: [{ name, image }] },
+                },
+                updateStrategy: { type: "RollingUpdate" },
+            },
+            status: {
+                desiredNumberScheduled: 0,
+                currentNumberScheduled: 0,
+                numberReady: 0,
+                numberAvailable: 0,
+                updatedNumberScheduled: 0,
+                observedGeneration: 1,
+            },
+        };
+        return { ...state, DaemonSets: [...state.DaemonSets, ds] };
+    }
+    if (action.type === UpdateDaemonSetStatusType) {
+        const { name, namespace, patch } = action.payload;
+        return {
+            ...state,
+            DaemonSets: state.DaemonSets.map(ds =>
+                ds.metadata.name === name && ds.metadata.namespace === namespace
+                    ? { ...ds, status: { ...ds.status, ...patch } }
+                    : ds
+            ),
+        };
+    }
+    if (action.type === DeleteDaemonSetType) {
+        const { name, namespace } = action.payload;
+        return {
+            ...state,
+            DaemonSets: state.DaemonSets.filter(
+                ds => !(ds.metadata.name === name && ds.metadata.namespace === namespace),
+            ),
         };
     }
     if (action.type === UpdatePodStatusType) {
@@ -748,12 +847,12 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
     }
     if (action.type === BindPodToNodeType) {
-        const { podName, namespace, nodeName, hostIP } = action.payload;
+        const { podName, namespace, nodeName } = action.payload;
         return {
             ...state,
             Pods: state.Pods.map(p =>
                 p.metadata.name === podName && p.metadata.namespace === namespace
-                    ? { ...p, spec: { ...p.spec, nodeName }, status: { ...p.status, hostIP } }
+                    ? { ...p, spec: { ...p.spec, nodeName } }
                     : p
             ),
         };

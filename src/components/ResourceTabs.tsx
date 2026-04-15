@@ -41,13 +41,13 @@ function AgeCell({ timestamp }: { timestamp: string }) {
   return <td>{timestamp ? age(timestamp) : ''}</td>;
 }
 
-type Tab = 'Deployments' | 'ReplicaSets' | 'Pods' | 'Services' | 'Nodes' | 'Jobs' | 'CronJobs';
+type Tab = 'Deployments' | 'DaemonSets' | 'ReplicaSets' | 'Pods' | 'Services' | 'Nodes' | 'Jobs' | 'CronJobs';
 
-const TABS: Tab[] = ['Deployments', 'ReplicaSets', 'Pods', 'Services', 'Nodes', 'Jobs', 'CronJobs'];
+const TABS: Tab[] = ['Deployments', 'DaemonSets', 'ReplicaSets', 'Pods', 'Services', 'Nodes', 'Jobs', 'CronJobs'];
 
-type Props = Pick<AppState, 'Deployments' | 'ReplicaSets' | 'Pods' | 'Services' | 'Endpoints' | 'Nodes' | 'Jobs' | 'CronJobs'>;
+type Props = Pick<AppState, 'Deployments' | 'DaemonSets' | 'ReplicaSets' | 'Pods' | 'Services' | 'Endpoints' | 'Nodes' | 'Jobs' | 'CronJobs'>;
 
-export function ResourceTabs({ Deployments, ReplicaSets, Pods, Services, Endpoints, Nodes, Jobs, CronJobs }: Props) {
+export function ResourceTabs({ Deployments, DaemonSets, ReplicaSets, Pods, Services, Endpoints, Nodes, Jobs, CronJobs }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('Deployments');
 
   return (
@@ -87,6 +87,34 @@ export function ResourceTabs({ Deployments, ReplicaSets, Pods, Services, Endpoin
                   <td>{d.status.readyReplicas}</td>
                   <td>{d.status.availableReplicas}</td>
                   <AgeCell timestamp={d.metadata.creationTimestamp} />
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {activeTab === 'DaemonSets' && (
+          <table className="resource-tabs__table">
+            <thead>
+              <tr>
+                <th>Namespace</th>
+                <th>Name</th>
+                <th>Desired</th>
+                <th>Current</th>
+                <th>Ready</th>
+                <th>Available</th>
+                <th>Age</th>
+              </tr>
+            </thead>
+            <tbody>
+              {DaemonSets.map(ds => (
+                <tr key={`${ds.metadata.namespace}/${ds.metadata.name}`}>
+                  <td>{ds.metadata.namespace}</td>
+                  <td>{ds.metadata.name}</td>
+                  <td>{ds.status.desiredNumberScheduled}</td>
+                  <td>{ds.status.currentNumberScheduled}</td>
+                  <td>{ds.status.numberReady}</td>
+                  <td>{ds.status.numberAvailable}</td>
+                  <AgeCell timestamp={ds.metadata.creationTimestamp} />
                 </tr>
               ))}
             </tbody>

@@ -79,10 +79,12 @@ export function useKubelet(
                 const podIP = node?.spec.podCIDR
                     ? podIPFromCIDR(node.spec.podCIDR)
                     : `10.${rand(0, 255)}.${rand(0, 255)}.${rand(2, 254)}`;
+                const hostIP = node?.status.addresses.find(a => a.type === "InternalIP")?.address;
                 dispatch(updatePodStatus(name, namespace, {
                     phase: "Running",
                     startTime,
                     podIP,
+                    ...(hostIP && { hostIP }),
                     conditions: [
                         { type: "PodScheduled",    status: "True", lastTransitionTime: startTime },
                         { type: "Initialized",     status: "True", lastTransitionTime: startTime },

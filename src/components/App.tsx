@@ -12,6 +12,7 @@ import { useEndpointsController } from '../controllers/useEndpointsController';
 import { useScheduler } from '../controllers/useScheduler';
 import { useJobController } from '../controllers/useJobController';
 import { useCronJobController } from '../controllers/useCronJobController';
+import { useDaemonSetController } from '../controllers/useDaemonSetController';
 const now = new Date().toISOString();
 function makeNode(name: string, internalIP: string, podCIDR: string) {
   return {
@@ -37,6 +38,7 @@ function makeNode(name: string, internalIP: string, podCIDR: string) {
 const initialState: AppState = {
   Deployments: [],
   ReplicaSets: [],
+  DaemonSets: [],
   Pods: [],
   Services: [],
   Endpoints: [],
@@ -61,6 +63,7 @@ function App() {
   useScheduler(store, dispatch);
   useJobController(store, dispatch);
   useCronJobController(store, dispatch);
+  useDaemonSetController(store, dispatch);
 
   function handleCommand(inputLine: string): Promise<string> {
     return command(inputLine, dispatch, store);
@@ -72,6 +75,7 @@ function App() {
         <h1>k8s.js</h1>
         <ResourceTabs
           Deployments={store.Deployments}
+          DaemonSets={store.DaemonSets}
           ReplicaSets={store.ReplicaSets}
           Pods={store.Pods}
           Services={store.Services}

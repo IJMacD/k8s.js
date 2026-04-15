@@ -1,5 +1,5 @@
 import type { ActionDispatch } from "react";
-import { createCronJob, createDeployment, createJob, createPod, createService, deleteCronJob, deleteDeployment, deleteJob, deletePod, deleteReplicaSet, deleteService, scaleDeployment, setDeploymentImage, updateNodeSpec, type Action, type AppState } from "../store/store";
+import { createCronJob, createDaemonSet, createDeployment, createJob, createPod, createService, deleteCronJob, deleteDaemonSet, deleteDeployment, deleteJob, deletePod, deleteReplicaSet, deleteService, scaleDeployment, setDeploymentImage, updateNodeSpec, type Action, type AppState } from "../store/store";
 
 /**
  * Strips -n / --namespace flags from kubectl args and returns the clean
@@ -100,6 +100,19 @@ export function kubectl(
             throw Error(`Error from server (AlreadyExists): cronjobs "${name}" already exists`);
         dispatch(createCronJob(name, { image, schedule, completions, parallelism }, namespace));
         return Promise.resolve(`cronjob.batch/${name} created`);
+    }
+    if (args[0] === "create" && args[1] === "daemonset") {
+        const name = args[2];
+        if (!name) throw Error("kubectl create daemonset: missing NAME");
+
+        const imageFlag = args.find(a => a.startsWith("--image="));
+        if (!imageFlag) throw Error("kubectl create daemonset: --image=IMAGE is required");
+        const image = imageFlag.slice("--image=".length);
+
+        if (state.DaemonSets.some(ds => ds.metadata.name === name && ds.metadata.namespace === namespace))
+            throw Error(`Error from server (AlreadyExists): daemonsets "${name}" already exists`);
+        dispatch(createDaemonSet(name, { image }, namespace));
+        return Promise.resolve(`daemonset.apps/${name} created`);
     }
     if (args[0] === "create" && args[1] === "deployment") {
         const name = args[2];
@@ -229,6 +242,42 @@ export function kubectl(
         const resolveName = () => resourceArg.includes("/")
             ? resourceArg.slice(resourceArg.indexOf("/") + 1)
             : args[2];
+
+        if (resourceArg.startsWith("daemonset/") || resourceArg.startsWith("ds/") || args[1] === "daemonset" || args[1] === "ds") {
+            const name = resolveName();
+            if (!name) throw Error("kubectl describe daemonset: missing name");
+            const ds = state.DaemonSets.find(d => d.metadata.name === name && d.metadata.namespace === namespace);
+            if (!ds) throw Error(`Error from server (NotFound): daemonsets "${name}" not found`);
+
+            const ownedPods = state.Pods.filter(
+                p => p.metadata.ownerReferences?.some(r => r.kind === "DaemonSet" && r.name === name) && p.metadata.namespace === namespace,
+            );
+            const containers = ds.spec.template.spec.containers;
+            const lines = [
+                `Name:           ${ds.metadata.name}`,
+                `Selector:       ${Object.entries(ds.spec.selector.matchLabels).map(([k, v]) => `${k}=${v}`).join(",")}`,
+                `Node-Selector:  <none>`,
+                `Labels:         ${Object.entries(ds.metadata.labels).map(([k, v]) => `${k}=${v}`).join("\n                ") || "<none>"}`,
+                `Annotations:    ${Object.entries(ds.metadata.annotations).map(([k, v]) => `${k}=${v}`).join("\n                ") || "<none>"}`,
+                `Desired Number of Nodes Scheduled: ${ds.status.desiredNumberScheduled}`,
+                `Current Number of Nodes Scheduled: ${ds.status.currentNumberScheduled}`,
+                `Number of Nodes Scheduled with Up-to-date Pods: ${ds.status.updatedNumberScheduled}`,
+                `Number of Nodes Scheduled with Available Pods: ${ds.status.numberAvailable}`,
+                `Number of Nodes Misscheduled: 0`,
+                `Pods Status:    ${ds.status.numberReady} Running / ${ownedPods.filter(p => p.status.phase === "Pending").length} Waiting / 0 Succeeded / 0 Failed`,
+                `Pod Template:`,
+                `  Labels:  ${Object.entries(ds.spec.template.metadata.labels ?? {}).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
+                `  Containers:`,
+                ...containers.flatMap(c => [
+                    `   ${c.name}:`,
+                    `    Image:  ${c.image}`,
+                    `    Port:   ${c.ports?.length ? c.ports.map(p => `${p.containerPort}/TCP`).join(", ") : "<none>"}`,
+                ]),
+                `Update Strategy: ${ds.spec.updateStrategy.type}`,
+                `Events:  <none>`,
+            ];
+            return Promise.resolve(lines.join("\n"));
+        }
 
         if (resourceArg.startsWith("deployment/") || resourceArg.startsWith("deploy/") || args[1] === "deployment" || args[1] === "deploy") {
             const name = resolveName();
@@ -634,6 +683,7 @@ export function kubectl(
                 case "job": case "jobs": return "job";
                 case "cronjob": case "cronjobs": return "cronjob";
                 case "node": case "nodes": return "node";
+                case "daemonset": case "daemonsets": case "ds": return "daemonset";
                 default: return null;
             }
         };
@@ -651,6 +701,7 @@ export function kubectl(
                 case "job": names = state.Jobs.filter(j => j.metadata.namespace === namespace).map(j => j.metadata.name); break;
                 case "cronjob": names = state.CronJobs.filter(c => c.metadata.namespace === namespace).map(c => c.metadata.name); break;
                 case "node": names = state.Nodes.map(n => n.metadata.name); break;
+                case "daemonset": names = state.DaemonSets.filter(ds => ds.metadata.namespace === namespace).map(ds => ds.metadata.name); break;
             }
         }
 
@@ -697,6 +748,13 @@ export function kubectl(
                     if (!cj) throw Error(`Error from server (NotFound): cronjobs "${name}" not found`);
                     dispatch(deleteCronJob(name, namespace));
                     lines.push(`cronjob.batch "${name}" deleted`);
+                    break;
+                }
+                case "daemonset": {
+                    const ds = state.DaemonSets.find(d => d.metadata.name === name && d.metadata.namespace === namespace);
+                    if (!ds) throw Error(`Error from server (NotFound): daemonsets "${name}" not found`);
+                    dispatch(deleteDaemonSet(name, namespace));
+                    lines.push(`daemonset.apps "${name}" deleted`);
                     break;
                 }
                 case "node": {
