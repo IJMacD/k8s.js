@@ -79,17 +79,21 @@ export function useDeploymentController(
                             containers,
                         }),
                     );
-                    // Scale down any stale RSes from a previous pod template
-                    for (const staleRS of ownedRSes) {
-                        if (staleRS.spec.replicas > 0) {
-                            dispatch(scaleReplicaSet(staleRS.metadata.name, 0, namespace));
-                        }
-                    }
                 }, RECONCILE_DELAY_MS));
             } else if (currentRS.spec.replicas !== deployment.spec.replicas) {
                 timers.push(setTimeout(() => {
                     dispatch(scaleReplicaSet(expectedRsName, deployment.spec.replicas, namespace));
                 }, RECONCILE_DELAY_MS));
+            }
+
+            // Scale down all non-current RSes (covers both new rollout and rollback cases)
+            for (const staleRS of ownedRSes) {
+                if (staleRS.metadata.name !== expectedRsName && staleRS.spec.replicas > 0) {
+                    timers.push(setTimeout(
+                        () => dispatch(scaleReplicaSet(staleRS.metadata.name, 0, namespace)),
+                        RECONCILE_DELAY_MS,
+                    ));
+                }
             }
 
             // Revision history pruning: delete stale scaled-to-0 RSes beyond revisionHistoryLimit
