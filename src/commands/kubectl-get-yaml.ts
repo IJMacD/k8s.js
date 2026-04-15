@@ -1,4 +1,3 @@
-import { dump } from "js-yaml";
 import type { AppState } from "../store/store";
 
 /** apiVersion + kind for every resource type this simulator knows about */
@@ -69,7 +68,7 @@ function collect(
 }
 
 /** Serialise a list of items into a YAML v1/List document */
-function makeList(items: object[]): string {
+function makeList(items: object[], dump: (obj: unknown, opts?: object) => string): string {
     return dump(
         { apiVersion: "v1", kind: "List", metadata: { resourceVersion: "" }, items },
         { lineWidth: -1, noRefs: true },
@@ -82,6 +81,7 @@ export async function* kubectlGetYaml(
     allNamespaces: boolean,
     state: AppState,
 ): AsyncGenerator<string> {
+    const { dump } = await import("js-yaml");
     // Strip -o / --output flags so they don't interfere with positional arg parsing.
     // args[0]="get"  args[1]=resource-type  args[2]=optional-name
     const cleanArgs: string[] = [];
@@ -111,7 +111,7 @@ export async function* kubectlGetYaml(
         const items = allKinds.flatMap(
             kind => collect(kind, undefined, namespace, allNamespaces, state).map(obj => annotate(kind, obj)),
         );
-        yield makeList(items);
+        yield makeList(items, dump);
         return;
     }
 
@@ -137,6 +137,6 @@ export async function* kubectlGetYaml(
     if (entries.length === 1 && entries[0].name !== undefined) {
         yield dump(allItems[0], { lineWidth: -1, noRefs: true }).trimEnd();
     } else {
-        yield makeList(allItems);
+        yield makeList(allItems, dump);
     }
 }

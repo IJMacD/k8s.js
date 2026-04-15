@@ -1,4 +1,3 @@
-import { loadAll } from "js-yaml";
 import type { ActionDispatch } from "react";
 import type { Container, PodTemplateSpec } from "../types/v1/Pod";
 import {
@@ -91,6 +90,7 @@ export async function* kubectlApply(
     const content = consumeUpload(filename);
     if (content === undefined) throw Error(`kubectl apply: cannot read file: ${filename}`);
 
+    const { loadAll } = await import("js-yaml");
     const docs: unknown[] = [];
     loadAll(content, doc => { if (doc !== null) docs.push(doc); });
     if (docs.length === 0) throw Error("kubectl apply: no documents found in file");
