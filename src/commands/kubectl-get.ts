@@ -1,4 +1,5 @@
 import type { AppState } from "../store/store";
+import { kubectlGetYaml } from "./kubectl-get-yaml";
 
 export async function* kubectlGet(
     args: string[],
@@ -6,6 +7,19 @@ export async function* kubectlGet(
     allNamespaces: boolean,
     state: AppState,
 ): AsyncGenerator<string> {
+    // Detect -o / --output flag and delegate for non-table formats
+    const oFlagIdx = args.findIndex(a => a === "-o" || a === "--output");
+    const outputFmt = oFlagIdx >= 0
+        ? args[oFlagIdx + 1]
+        : args.find(a => a.startsWith("-o=") || a.startsWith("--output="))?.split("=")[1];
+    if (outputFmt === "yaml") {
+        yield* kubectlGetYaml(args, namespace, allNamespaces, state);
+        return;
+    }
+    if (outputFmt !== undefined && outputFmt !== "wide") {
+        throw Error(`kubectl get: output format "${outputFmt}" is not supported (use yaml or wide)`);
+    }
+
     const allNs = allNamespaces;
 
     // Elapsed-time formatter: from ISO timestamp (to optional end timestamp)
