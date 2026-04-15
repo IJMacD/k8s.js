@@ -12,7 +12,8 @@ import { useEndpointsController } from '../controllers/useEndpointsController';
 import { useScheduler } from '../controllers/useScheduler';
 import { useJobController } from '../controllers/useJobController';
 import { useCronJobController } from '../controllers/useCronJobController';
-import { useDaemonSetController } from '../controllers/useDaemonSetController';
+import { useDaemonSetController } from '../controllers/useDaemonSetController'
+import { useStatefulSetController } from '../controllers/useStatefulSetController';
 const now = new Date().toISOString();
 function makeNode(name: string, internalIP: string, podCIDR: string) {
   return {
@@ -39,6 +40,7 @@ const initialState: AppState = {
   Deployments: [],
   ReplicaSets: [],
   DaemonSets: [],
+  StatefulSets: [],
   Pods: [],
   Services: [],
   Endpoints: [],
@@ -63,6 +65,7 @@ function App() {
   useJobController(store, dispatch);
   useCronJobController(store, dispatch);
   useDaemonSetController(store, dispatch);
+  useStatefulSetController(store, dispatch);
 
   const storeRef = useRef(store);
   // eslint-disable-next-line react-hooks/refs
@@ -79,6 +82,7 @@ function App() {
         <ResourceTabs
           Deployments={store.Deployments}
           DaemonSets={store.DaemonSets}
+          StatefulSets={store.StatefulSets}
           ReplicaSets={store.ReplicaSets}
           Pods={store.Pods}
           Services={store.Services}

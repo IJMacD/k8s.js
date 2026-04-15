@@ -2,6 +2,7 @@ import type { Deployment } from "../types/apps/v1/Deployment";
 import type { Pod } from "../types/v1/Pod";
 import type { ReplicaSet } from "../types/apps/v1/ReplicaSet";
 import type { DaemonSet } from "../types/apps/v1/DaemonSet";
+import type { StatefulSet } from "../types/apps/v1/StatefulSet";
 import type { Service, Endpoints } from "../types/v1/Service";
 import type { KubeNode } from "../types/v1/Node";
 import type { Job, CronJob } from "../types/batch/v1/Job";
@@ -11,6 +12,7 @@ export interface AppState {
     Deployments: Deployment[];
     ReplicaSets: ReplicaSet[];
     DaemonSets: DaemonSet[];
+    StatefulSets: StatefulSet[];
     Pods: Pod[];
     Services: Service[];
     Endpoints: Endpoints[];
@@ -46,6 +48,10 @@ const DeleteCronJobType = "DELETE_CRONJOB";
 const CreateDaemonSetType = "CREATE_DAEMONSET";
 const DeleteDaemonSetType = "DELETE_DAEMONSET";
 const UpdateDaemonSetStatusType = "UPDATE_DAEMONSET_STATUS";
+const CreateStatefulSetType = "CREATE_STATEFULSET";
+const DeleteStatefulSetType = "DELETE_STATEFULSET";
+const UpdateStatefulSetStatusType = "UPDATE_STATEFULSET_STATUS";
+const ScaleStatefulSetType = "SCALE_STATEFULSET";
 
 export type ActionType =
     | typeof CreateDeploymentType
@@ -74,7 +80,11 @@ export type ActionType =
     | typeof DeleteCronJobType
     | typeof CreateDaemonSetType
     | typeof DeleteDaemonSetType
-    | typeof UpdateDaemonSetStatusType;
+    | typeof UpdateDaemonSetStatusType
+    | typeof CreateStatefulSetType
+    | typeof DeleteStatefulSetType
+    | typeof UpdateStatefulSetStatusType
+    | typeof ScaleStatefulSetType;
 
 export interface CreateDeploymentAction {
     type: typeof CreateDeploymentType;
@@ -100,6 +110,20 @@ export interface CreatePodAction {
 export interface CreateDaemonSetAction {
     type: typeof CreateDaemonSetType;
     payload: { name: string; namespace: string; image: string };
+}
+
+export interface CreateStatefulSetAction {
+    type: typeof CreateStatefulSetType;
+    payload: { name: string; namespace: string; image: string; replicas: number; serviceName: string };
+}
+
+export interface UpdateStatefulSetStatusAction {
+    type: typeof UpdateStatefulSetStatusType;
+    payload: {
+        name: string;
+        namespace: string;
+        patch: Partial<import("../types/apps/v1/StatefulSet").StatefulSetStatus>;
+    };
 }
 
 export interface UpdateDaemonSetStatusAction {
@@ -269,7 +293,11 @@ export type Action =
     | { type: typeof DeleteCronJobType; payload: { name: string; namespace: string } }
     | CreateDaemonSetAction
     | UpdateDaemonSetStatusAction
-    | { type: typeof DeleteDaemonSetType; payload: { name: string; namespace: string } };
+    | { type: typeof DeleteDaemonSetType; payload: { name: string; namespace: string } }
+    | CreateStatefulSetAction
+    | UpdateStatefulSetStatusAction
+    | { type: typeof ScaleStatefulSetType; payload: { name: string; namespace: string; replicas: number } }
+    | { type: typeof DeleteStatefulSetType; payload: { name: string; namespace: string } };
 
 export function deleteDeployment(name: string, namespace = "default") {
     return { type: DeleteDeploymentType as typeof DeleteDeploymentType, payload: { name, namespace } };
@@ -297,6 +325,39 @@ export function createDaemonSet(
 
 export function deleteDaemonSet(name: string, namespace = "default") {
     return { type: DeleteDaemonSetType as typeof DeleteDaemonSetType, payload: { name, namespace } };
+}
+
+export function createStatefulSet(
+    name: string,
+    spec: { image: string; replicas?: number; serviceName?: string },
+    namespace = "default",
+): CreateStatefulSetAction {
+    return {
+        type: CreateStatefulSetType,
+        payload: {
+            name,
+            namespace,
+            image: spec.image,
+            replicas: spec.replicas ?? 1,
+            serviceName: spec.serviceName ?? name,
+        },
+    };
+}
+
+export function deleteStatefulSet(name: string, namespace = "default") {
+    return { type: DeleteStatefulSetType as typeof DeleteStatefulSetType, payload: { name, namespace } };
+}
+
+export function scaleStatefulSet(name: string, replicas: number, namespace = "default") {
+    return { type: ScaleStatefulSetType as typeof ScaleStatefulSetType, payload: { name, namespace, replicas } };
+}
+
+export function updateStatefulSetStatus(
+    name: string,
+    namespace: string,
+    patch: Partial<import("../types/apps/v1/StatefulSet").StatefulSetStatus>,
+): UpdateStatefulSetStatusAction {
+    return { type: UpdateStatefulSetStatusType, payload: { name, namespace, patch } };
 }
 
 export function updateDaemonSetStatus(
@@ -993,6 +1054,71 @@ export const reducer = (state: AppState, action: Action): AppState => {
             ...state,
             CronJobs: state.CronJobs.filter(
                 c => !(c.metadata.name === name && c.metadata.namespace === namespace),
+            ),
+        };
+    }
+    if (action.type === CreateStatefulSetType) {
+        const { name, namespace, image, replicas, serviceName } = action.payload;
+        const creationTimestamp = new Date().toISOString();
+        const sts: StatefulSet = {
+            metadata: {
+                uid: crypto.randomUUID(),
+                name,
+                namespace,
+                labels: { app: name },
+                annotations: {},
+                creationTimestamp,
+                generation: 1,
+            },
+            spec: {
+                replicas,
+                selector: { matchLabels: { app: name } },
+                template: {
+                    metadata: { name, namespace, labels: { app: name } },
+                    spec: { containers: [{ name, image }] },
+                },
+                serviceName,
+                podManagementPolicy: "OrderedReady",
+                updateStrategy: { type: "RollingUpdate" },
+            },
+            status: {
+                observedGeneration: 1,
+                replicas: 0,
+                readyReplicas: 0,
+                availableReplicas: 0,
+                updatedReplicas: 0,
+            },
+        };
+        return { ...state, StatefulSets: [...state.StatefulSets, sts] };
+    }
+    if (action.type === ScaleStatefulSetType) {
+        const { name, namespace, replicas } = action.payload;
+        return {
+            ...state,
+            StatefulSets: state.StatefulSets.map(sts =>
+                sts.metadata.name === name && sts.metadata.namespace === namespace
+                    ? { ...sts, spec: { ...sts.spec, replicas } }
+                    : sts
+            ),
+        };
+    }
+    if (action.type === UpdateStatefulSetStatusType) {
+        const { name, namespace, patch } = action.payload;
+        return {
+            ...state,
+            StatefulSets: state.StatefulSets.map(sts =>
+                sts.metadata.name === name && sts.metadata.namespace === namespace
+                    ? { ...sts, status: { ...sts.status, ...patch } }
+                    : sts
+            ),
+        };
+    }
+    if (action.type === DeleteStatefulSetType) {
+        const { name, namespace } = action.payload;
+        return {
+            ...state,
+            StatefulSets: state.StatefulSets.filter(
+                sts => !(sts.metadata.name === name && sts.metadata.namespace === namespace),
             ),
         };
     }

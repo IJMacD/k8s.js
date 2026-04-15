@@ -41,13 +41,13 @@ function AgeCell({ timestamp }: { timestamp: string }) {
   return <td>{timestamp ? age(timestamp) : ''}</td>;
 }
 
-type Tab = 'Deployments' | 'DaemonSets' | 'ReplicaSets' | 'Pods' | 'Services' | 'Nodes' | 'Jobs' | 'CronJobs';
+type Tab = 'Deployments' | 'DaemonSets' | 'StatefulSets' | 'ReplicaSets' | 'Pods' | 'Services' | 'Nodes' | 'Jobs' | 'CronJobs';
 
-const TABS: Tab[] = ['Deployments', 'DaemonSets', 'ReplicaSets', 'Pods', 'Services', 'Nodes', 'Jobs', 'CronJobs'];
+const TABS: Tab[] = ['Deployments', 'DaemonSets', 'StatefulSets', 'ReplicaSets', 'Pods', 'Services', 'Nodes', 'Jobs', 'CronJobs'];
 
-type Props = Pick<AppState, 'Deployments' | 'DaemonSets' | 'ReplicaSets' | 'Pods' | 'Services' | 'Endpoints' | 'Nodes' | 'Jobs' | 'CronJobs'>;
+type Props = Pick<AppState, 'Deployments' | 'DaemonSets' | 'StatefulSets' | 'ReplicaSets' | 'Pods' | 'Services' | 'Endpoints' | 'Nodes' | 'Jobs' | 'CronJobs'>;
 
-export function ResourceTabs({ Deployments, DaemonSets, ReplicaSets, Pods, Services, Endpoints, Nodes, Jobs, CronJobs }: Props) {
+export function ResourceTabs({ Deployments, DaemonSets, StatefulSets, ReplicaSets, Pods, Services, Endpoints, Nodes, Jobs, CronJobs }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('Deployments');
 
   return (
@@ -115,6 +115,32 @@ export function ResourceTabs({ Deployments, DaemonSets, ReplicaSets, Pods, Servi
                   <td>{ds.status.numberReady}</td>
                   <td>{ds.status.numberAvailable}</td>
                   <AgeCell timestamp={ds.metadata.creationTimestamp} />
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {activeTab === 'StatefulSets' && (
+          <table className="resource-tabs__table">
+            <thead>
+              <tr>
+                <th>Namespace</th>
+                <th>Name</th>
+                <th>Desired</th>
+                <th>Ready</th>
+                <th>Service</th>
+                <th>Age</th>
+              </tr>
+            </thead>
+            <tbody>
+              {StatefulSets.map(sts => (
+                <tr key={`${sts.metadata.namespace}/${sts.metadata.name}`}>
+                  <td>{sts.metadata.namespace}</td>
+                  <td>{sts.metadata.name}</td>
+                  <td>{sts.spec.replicas}</td>
+                  <td>{sts.status.readyReplicas}/{sts.spec.replicas}</td>
+                  <td>{sts.spec.serviceName}</td>
+                  <AgeCell timestamp={sts.metadata.creationTimestamp} />
                 </tr>
               ))}
             </tbody>

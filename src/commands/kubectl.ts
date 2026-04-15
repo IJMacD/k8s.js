@@ -1,5 +1,5 @@
 import type { ActionDispatch } from "react";
-import { createCronJob, createDaemonSet, createDeployment, createJob, createPod, createService, deleteCronJob, deleteDaemonSet, deleteDeployment, deleteJob, deletePod, deleteReplicaSet, deleteService, scaleDeployment, setDeploymentImage, updateNodeSpec, type Action, type AppState } from "../store/store";
+import { createCronJob, createDaemonSet, createDeployment, createJob, createPod, createService, createStatefulSet, deleteCronJob, deleteDaemonSet, deleteDeployment, deleteJob, deletePod, deleteReplicaSet, deleteService, deleteStatefulSet, scaleDeployment, scaleStatefulSet, setDeploymentImage, updateNodeSpec, type Action, type AppState } from "../store/store";
 
 /**
  * Strips -n / --namespace flags from kubectl args and returns the clean
@@ -115,6 +115,22 @@ export async function* kubectl(
         dispatch(createDaemonSet(name, { image }, namespace));
         yield `daemonset.apps/${name} created`; return;
     }
+    if (args[0] === "create" && args[1] === "statefulset") {
+        const name = args[2];
+        if (!name) throw Error("kubectl create statefulset: missing NAME");
+
+        const imageFlag = args.find(a => a.startsWith("--image="));
+        if (!imageFlag) throw Error("kubectl create statefulset: --image=IMAGE is required");
+        const image = imageFlag.slice("--image=".length);
+
+        const replicasFlag = args.find(a => a.startsWith("--replicas="));
+        const replicas = replicasFlag ? parseInt(replicasFlag.slice("--replicas=".length), 10) : 1;
+
+        if (state.StatefulSets.some(sts => sts.metadata.name === name && sts.metadata.namespace === namespace))
+            throw Error(`Error from server (AlreadyExists): statefulsets "${name}" already exists`);
+        dispatch(createStatefulSet(name, { image, replicas }, namespace));
+        yield `statefulset.apps/${name} created`; return;
+    }
     if (args[0] === "create" && args[1] === "deployment") {
         const name = args[2];
         if (!name) throw Error("kubectl create deployment: missing NAME");
@@ -157,6 +173,20 @@ export async function* kubectl(
         const replicas = parseInt(replicasFlag.slice("--replicas=".length), 10);
         if (isNaN(replicas) || replicas < 0) throw Error("kubectl scale: --replicas must be a non-negative integer");
 
+        // statefulset/NAME  or  statefulset NAME  or  sts/NAME  or  sts NAME
+        const stsSlashArg = args.find(a => a.startsWith("statefulset/") || a.startsWith("sts/"));
+        if (stsSlashArg) {
+            const resourceName = stsSlashArg.slice(stsSlashArg.indexOf("/") + 1);
+            dispatch(scaleStatefulSet(resourceName, replicas, namespace));
+            yield `statefulset.apps/${resourceName} scaled`; return;
+        }
+        if (args[1] === "statefulset" || args[1] === "sts") {
+            const resourceName = args[2];
+            if (!resourceName) throw Error("kubectl scale: missing statefulset name");
+            dispatch(scaleStatefulSet(resourceName, replicas, namespace));
+            yield `statefulset.apps/${resourceName} scaled`; return;
+        }
+
         // accept: deployment/NAME  or  deployment NAME
         let resourceName: string | undefined;
         const slashArg = args.find(a => a.startsWith("deployment/"));
@@ -165,7 +195,7 @@ export async function* kubectl(
         } else if (args[1] === "deployment") {
             resourceName = args[2];
         }
-        if (!resourceName) throw Error("kubectl scale: specify deployment/NAME or deployment NAME");
+        if (!resourceName) throw Error("kubectl scale: specify deployment/NAME, statefulset/NAME, or equivalent");
 
         dispatch(scaleDeployment(resourceName, replicas, namespace));
         yield `deployment.apps/${resourceName} scaled`; return;
@@ -361,6 +391,21 @@ export async function* kubectl(
                 ]);
                 return fmtTable(headers, rows);
             }
+            if (type === "statefulsets" || type === "statefulset" || type === "sts") {
+                const items = state.StatefulSets.filter(
+                    sts => inNs(sts.metadata.namespace) && (name === undefined || sts.metadata.name === name),
+                );
+                if (name && items.length === 0)
+                    throw Error(`Error from server (NotFound): statefulsets "${name}" not found`);
+                const headers = [...nsHdr, "NAME", "READY", "AGE"];
+                const rows = items.map(sts => [
+                    ...nsCol(sts.metadata.namespace),
+                    sts.metadata.name,
+                    `${sts.status.readyReplicas}/${sts.spec.replicas}`,
+                    ageStr(sts.metadata.creationTimestamp),
+                ]);
+                return fmtTable(headers, rows);
+            }
             if (type === "services" || type === "service" || type === "svc") {
                 const items = state.Services.filter(
                     s => inNs(s.metadata.namespace) && (name === undefined || s.metadata.name === name),
@@ -461,6 +506,7 @@ export async function* kubectl(
                     ["pods", "pod.v1"],
                     ["services", "service.v1"],
                     ["daemonsets", "daemonset.apps"],
+                    ["statefulsets", "statefulset.apps"],
                     ["replicasets", "replicaset.apps"],
                     ["deployments", "deployment.apps"],
                     ["jobs", "job.batch"],
@@ -602,6 +648,45 @@ export async function* kubectl(
                 ]),
                 `Update Strategy: ${ds.spec.updateStrategy.type}`,
                 `Events:  <none>`,
+            ];
+            yield lines.join("\n"); return;
+        }
+
+        if (resourceArg.startsWith("statefulset/") || resourceArg.startsWith("sts/") || args[1] === "statefulset" || args[1] === "sts") {
+            const name = resolveName();
+            if (!name) throw Error("kubectl describe statefulset: missing name");
+            const sts = state.StatefulSets.find(s => s.metadata.name === name && s.metadata.namespace === namespace);
+            if (!sts) throw Error(`Error from server (NotFound): statefulsets "${name}" not found`);
+
+            const ownedPods = state.Pods.filter(
+                p => p.metadata.ownerReferences?.some(r => r.kind === "StatefulSet" && r.name === name) && p.metadata.namespace === namespace,
+            );
+            const containers = sts.spec.template.spec.containers;
+            const runningCount = ownedPods.filter(p => p.status.phase === "Running").length;
+            const pendingCount = ownedPods.filter(p => p.status.phase === "Pending").length;
+            const lines = [
+                `Name:               ${sts.metadata.name}`,
+                `Namespace:          ${sts.metadata.namespace}`,
+                `CreationTimestamp:  ${sts.metadata.creationTimestamp}`,
+                `Selector:           ${Object.entries(sts.spec.selector.matchLabels).map(([k, v]) => `${k}=${v}`).join(",")}`,
+                `Labels:             ${Object.entries(sts.metadata.labels).map(([k, v]) => `${k}=${v}`).join("\n                    ") || "<none>"}`,
+                `Annotations:        ${Object.entries(sts.metadata.annotations).map(([k, v]) => `${k}=${v}`).join("\n                    ") || "<none>"}`,
+                `Replicas:           ${sts.spec.replicas} desired | ${sts.status.updatedReplicas} total`,
+                `Update Strategy:    ${sts.spec.updateStrategy?.type ?? "RollingUpdate"}`,
+                `  Partition:        0`,
+                `Pod Management Policy:  ${sts.spec.podManagementPolicy ?? "OrderedReady"}`,
+                `Pods Status:        ${runningCount} Running / ${pendingCount} Waiting / 0 Succeeded / 0 Failed`,
+                `Pod Template:`,
+                `  Labels:  ${Object.entries(sts.spec.template.metadata.labels ?? {}).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
+                `  Containers:`,
+                ...containers.flatMap(c => [
+                    `   ${c.name}:`,
+                    `    Image:  ${c.image}`,
+                    `    Port:   ${c.ports?.length ? c.ports.map(p => `${p.containerPort}/TCP`).join(", ") : "<none>"}`,
+                ]),
+                `Volume Claim Templates:  <none>`,
+                `Service Name:  ${sts.spec.serviceName}`,
+                `Events:        <none>`,
             ];
             yield lines.join("\n"); return;
         }
@@ -1011,6 +1096,7 @@ export async function* kubectl(
                 case "cronjob": case "cronjobs": return "cronjob";
                 case "node": case "nodes": return "node";
                 case "daemonset": case "daemonsets": case "ds": return "daemonset";
+                case "statefulset": case "statefulsets": case "sts": return "statefulset";
                 default: return null;
             }
         };
@@ -1029,6 +1115,7 @@ export async function* kubectl(
                 case "cronjob": names = state.CronJobs.filter(c => c.metadata.namespace === namespace).map(c => c.metadata.name); break;
                 case "node": names = state.Nodes.map(n => n.metadata.name); break;
                 case "daemonset": names = state.DaemonSets.filter(ds => ds.metadata.namespace === namespace).map(ds => ds.metadata.name); break;
+                case "statefulset": names = state.StatefulSets.filter(sts => sts.metadata.namespace === namespace).map(sts => sts.metadata.name); break;
             }
         }
 
@@ -1082,6 +1169,13 @@ export async function* kubectl(
                     if (!ds) throw Error(`Error from server (NotFound): daemonsets "${name}" not found`);
                     dispatch(deleteDaemonSet(name, namespace));
                     lines.push(`daemonset.apps "${name}" deleted`);
+                    break;
+                }
+                case "statefulset": {
+                    const sts = state.StatefulSets.find(s => s.metadata.name === name && s.metadata.namespace === namespace);
+                    if (!sts) throw Error(`Error from server (NotFound): statefulsets "${name}" not found`);
+                    dispatch(deleteStatefulSet(name, namespace));
+                    lines.push(`statefulset.apps "${name}" deleted`);
                     break;
                 }
                 case "node": {
