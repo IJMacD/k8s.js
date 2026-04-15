@@ -272,7 +272,7 @@ export function ResourceTabs({ Deployments, ReplicaSets, Pods, Services, Endpoin
             <tbody>
               {CronJobs.map(c => {
                 const activeCount = Jobs.filter(
-                  j => j.metadata.ownerCronJob === c.metadata.name &&
+                  j => j.metadata.ownerReferences?.some(r => r.kind === "CronJob" && r.name === c.metadata.name) &&
                        !j.status.conditions.some(cond => (cond.type === 'Complete' || cond.type === 'Failed') && cond.status === 'True'),
                 ).length;
                 return (

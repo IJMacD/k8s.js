@@ -4,6 +4,7 @@ import type { ReplicaSet } from "../types/apps/v1/ReplicaSet";
 import type { Service, Endpoints } from "../types/v1/Service";
 import type { KubeNode } from "../types/v1/Node";
 import type { Job, CronJob } from "../types/batch/v1/Job";
+import type { OwnerReference } from "../types/v1/ObjectMeta";
 
 export interface AppState {
     Deployments: Deployment[];
@@ -35,6 +36,11 @@ const CreateJobType = "CREATE_JOB";
 const UpdateJobStatusType = "UPDATE_JOB_STATUS";
 const CreateCronJobType = "CREATE_CRONJOB";
 const UpdateCronJobStatusType = "UPDATE_CRONJOB_STATUS";
+const DeleteDeploymentType = "DELETE_DEPLOYMENT";
+const DeleteReplicaSetType = "DELETE_REPLICASET";
+const DeleteServiceType = "DELETE_SERVICE";
+const DeleteJobType = "DELETE_JOB";
+const DeleteCronJobType = "DELETE_CRONJOB";
 
 export type ActionType =
     | typeof CreateDeploymentType
@@ -55,7 +61,12 @@ export type ActionType =
     | typeof CreateJobType
     | typeof UpdateJobStatusType
     | typeof CreateCronJobType
-    | typeof UpdateCronJobStatusType;
+    | typeof UpdateCronJobStatusType
+    | typeof DeleteDeploymentType
+    | typeof DeleteReplicaSetType
+    | typeof DeleteServiceType
+    | typeof DeleteJobType
+    | typeof DeleteCronJobType;
 
 export interface CreateDeploymentAction {
     type: typeof CreateDeploymentType;
@@ -72,8 +83,7 @@ export interface CreatePodAction {
         labels?: Record<string, string>;
         restartPolicy?: "Always" | "OnFailure" | "Never";
         creationTimestamp: string;
-        ownerReplicaSet?: string;
-        ownerJob?: string;
+        ownerReferences?: OwnerReference[];
     };
 }
 
@@ -86,7 +96,7 @@ export interface CreateJobAction {
         completions: number;
         parallelism: number;
         backoffLimit: number;
-        ownerCronJob?: string;
+        ownerReferences?: OwnerReference[];
         creationTimestamp: string;
     };
 }
@@ -228,12 +238,34 @@ export type Action =
     | CreateJobAction
     | UpdateJobStatusAction
     | CreateCronJobAction
-    | UpdateCronJobStatusAction;
+    | UpdateCronJobStatusAction
+    | { type: typeof DeleteDeploymentType; payload: { name: string; namespace: string } }
+    | { type: typeof DeleteReplicaSetType; payload: { name: string; namespace: string } }
+    | { type: typeof DeleteServiceType; payload: { name: string; namespace: string } }
+    | { type: typeof DeleteJobType; payload: { name: string; namespace: string } }
+    | { type: typeof DeleteCronJobType; payload: { name: string; namespace: string } };
+
+export function deleteDeployment(name: string, namespace = "default") {
+    return { type: DeleteDeploymentType as typeof DeleteDeploymentType, payload: { name, namespace } };
+}
+export function deleteReplicaSet(name: string, namespace = "default") {
+    return { type: DeleteReplicaSetType as typeof DeleteReplicaSetType, payload: { name, namespace } };
+}
+export function deleteService(name: string, namespace = "default") {
+    return { type: DeleteServiceType as typeof DeleteServiceType, payload: { name, namespace } };
+}
+export function deleteJob(name: string, namespace = "default") {
+    return { type: DeleteJobType as typeof DeleteJobType, payload: { name, namespace } };
+}
+export function deleteCronJob(name: string, namespace = "default") {
+    return { type: DeleteCronJobType as typeof DeleteCronJobType, payload: { name, namespace } };
+}
 
 export function createJob(
     name: string,
-    spec: { image: string; completions?: number; parallelism?: number; backoffLimit?: number; ownerCronJob?: string },
+    spec: { image: string; completions?: number; parallelism?: number; backoffLimit?: number },
     namespace = "default",
+    ownerRef?: { kind: string; apiVersion: string; name: string; uid: string },
 ): CreateJobAction {
     return {
         type: CreateJobType,
@@ -244,7 +276,9 @@ export function createJob(
             completions: spec.completions ?? 1,
             parallelism: spec.parallelism ?? 1,
             backoffLimit: spec.backoffLimit ?? 6,
-            ownerCronJob: spec.ownerCronJob,
+            ownerReferences: ownerRef
+                ? [{ ...ownerRef, controller: true, blockOwnerDeletion: true }]
+                : undefined,
             creationTimestamp: new Date().toISOString(),
         },
     };
@@ -343,7 +377,7 @@ export interface CreateReplicaSetAction {
     payload: {
         name: string;
         namespace: string;
-        ownerDeployment: string;
+        ownerRef: { name: string; uid: string };
         replicas: number;
         selector: { matchLabels: Record<string, string> };
         containers: Array<{ name: string; image: string }>;
@@ -403,9 +437,9 @@ export function createDeployment(
 
 export function createPod(
     name: string,
-    spec: { image: string; containerName?: string; labels?: Record<string, string>; restartPolicy?: "Always" | "OnFailure" | "Never"; ownerJob?: string },
+    spec: { image: string; containerName?: string; labels?: Record<string, string>; restartPolicy?: "Always" | "OnFailure" | "Never" },
     namespace = "default",
-    ownerReplicaSet?: string,
+    ownerRef?: { kind: string; apiVersion: string; name: string; uid: string },
 ): CreatePodAction {
     return {
         type: CreatePodType,
@@ -416,16 +450,17 @@ export function createPod(
             containerName: spec.containerName,
             labels: spec.labels,
             restartPolicy: spec.restartPolicy,
-            ownerJob: spec.ownerJob,
             creationTimestamp: new Date().toISOString(),
-            ownerReplicaSet,
+            ownerReferences: ownerRef
+                ? [{ ...ownerRef, controller: true, blockOwnerDeletion: true }]
+                : undefined,
         },
     };
 }
 
 export const reducer = (state: AppState, action: Action): AppState => {
     if (action.type === CreateReplicaSetType) {
-        const { name, namespace, ownerDeployment, replicas, selector, containers } = action.payload;
+        const { name, namespace, ownerRef, replicas, selector, containers } = action.payload;
         const creationTimestamp = new Date().toISOString();
         return {
             ...state,
@@ -437,7 +472,8 @@ export const reducer = (state: AppState, action: Action): AppState => {
                         name,
                         namespace,
                         labels: selector.matchLabels,
-                        annotations: { ownerDeployment },
+                        annotations: {},
+                        ownerReferences: [{ apiVersion: "apps/v1", kind: "Deployment", name: ownerRef.name, uid: ownerRef.uid, controller: true, blockOwnerDeletion: true }],
                         creationTimestamp,
                         generation: 1,
                     },
@@ -569,7 +605,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
     }
     if (action.type === CreatePodType) {
-        const { name, namespace, image, containerName, labels, restartPolicy, creationTimestamp, ownerReplicaSet, ownerJob } = action.payload;
+        const { name, namespace, image, containerName, labels, restartPolicy, creationTimestamp, ownerReferences } = action.payload;
         return {
             ...state,
             Pods: [
@@ -581,10 +617,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
                         uid: crypto.randomUUID(),
                         creationTimestamp,
                         ...(labels && { labels }),
-                        annotations: {
-                            ...(ownerReplicaSet ? { ownerReplicaSet } : {}),
-                            ...(ownerJob ? { ownerJob } : {}),
-                        },
+                        ...(ownerReferences && { ownerReferences }),
                     },
                     status: {
                         phase: "Pending",
@@ -724,7 +757,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
     }
     if (action.type === CreateJobType) {
-        const { name, namespace, image, completions, parallelism, backoffLimit, ownerCronJob, creationTimestamp } = action.payload;
+        const { name, namespace, image, completions, parallelism, backoffLimit, ownerReferences, creationTimestamp } = action.payload;
         const job: Job = {
             metadata: {
                 uid: crypto.randomUUID(),
@@ -732,8 +765,8 @@ export const reducer = (state: AppState, action: Action): AppState => {
                 namespace,
                 labels: { "job-name": name },
                 annotations: {},
+                ...(ownerReferences && { ownerReferences }),
                 creationTimestamp,
-                ...(ownerCronJob && { ownerCronJob }),
             },
             spec: {
                 completions,
@@ -811,6 +844,54 @@ export const reducer = (state: AppState, action: Action): AppState => {
                 c.metadata.name === name && c.metadata.namespace === namespace
                     ? { ...c, status: { ...c.status, ...patch } }
                     : c,
+            ),
+        };
+    }
+    if (action.type === DeleteDeploymentType) {
+        const { name, namespace } = action.payload;
+        return {
+            ...state,
+            Deployments: state.Deployments.filter(
+                d => !(d.metadata.name === name && d.metadata.namespace === namespace),
+            ),
+        };
+    }
+    if (action.type === DeleteReplicaSetType) {
+        const { name, namespace } = action.payload;
+        return {
+            ...state,
+            ReplicaSets: state.ReplicaSets.filter(
+                r => !(r.metadata.name === name && r.metadata.namespace === namespace),
+            ),
+        };
+    }
+    if (action.type === DeleteServiceType) {
+        const { name, namespace } = action.payload;
+        return {
+            ...state,
+            Services: state.Services.filter(
+                s => !(s.metadata.name === name && s.metadata.namespace === namespace),
+            ),
+            Endpoints: state.Endpoints.filter(
+                e => !(e.metadata.name === name && e.metadata.namespace === namespace),
+            ),
+        };
+    }
+    if (action.type === DeleteJobType) {
+        const { name, namespace } = action.payload;
+        return {
+            ...state,
+            Jobs: state.Jobs.filter(
+                j => !(j.metadata.name === name && j.metadata.namespace === namespace),
+            ),
+        };
+    }
+    if (action.type === DeleteCronJobType) {
+        const { name, namespace } = action.payload;
+        return {
+            ...state,
+            CronJobs: state.CronJobs.filter(
+                c => !(c.metadata.name === name && c.metadata.namespace === namespace),
             ),
         };
     }

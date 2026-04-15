@@ -1,4 +1,5 @@
 import type { PodTemplateSpec } from "../../v1/Pod";
+import type { OwnerReference } from "../../v1/ObjectMeta";
 
 export interface ReplicaSet {
     metadata: ReplicaSetMetadata;
@@ -12,8 +13,9 @@ export interface ReplicaSetMetadata {
     namespace: string;
     labels: Record<string, string>;
     annotations: Record<string, string>;
-    creationTimestamp: string; // ISO 8601 format
-    generation: number; // A sequence number representing the generation of the replicaset
+    ownerReferences?: OwnerReference[];
+    creationTimestamp: string;
+    generation: number;
 }
 
 export interface ReplicaSetStatus {

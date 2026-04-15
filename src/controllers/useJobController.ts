@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { ActionDispatch } from "react";
 import type { AppState, Action } from "../store/store";
-import { createPod, updateJobStatus } from "../store/store";
+import { createPod, deletePod, updateJobStatus } from "../store/store";
 
 const RECONCILE_DELAY_MS = 1_000;
 
@@ -40,7 +40,7 @@ export function useJobController(
             const jobPods = Pods.filter(
                 p =>
                     p.metadata.namespace === namespace &&
-                    p.metadata.annotations?.["ownerJob"] === name,
+                    p.metadata.ownerReferences?.some(r => r.kind === "Job" && r.name === name),
             );
 
             const succeeded = jobPods.filter(p => p.status.phase === "Succeeded").length;
@@ -121,14 +121,26 @@ export function useJobController(
                                         containerName: containers[0]?.name,
                                         labels: { "job-name": name },
                                         restartPolicy: "Never",
-                                        ownerJob: name,
                                     },
                                     namespace,
+                                    { kind: "Job", apiVersion: "batch/v1", name, uid: job.metadata.uid },
                                 ),
                             );
                         }, RECONCILE_DELAY_MS * (i + 1)),
                     );
                 }
+            }
+        }
+
+        // GC: delete pods whose owning Job has been deleted
+        for (const pod of Pods) {
+            const owner = pod.metadata.ownerReferences?.find(r => r.kind === "Job");
+            if (!owner) continue;
+            const ownerExists = Jobs.some(
+                j => j.metadata.name === owner.name && j.metadata.namespace === pod.metadata.namespace,
+            );
+            if (!ownerExists) {
+                timers.push(setTimeout(() => dispatch(deletePod(pod.metadata.name, pod.metadata.namespace)), RECONCILE_DELAY_MS));
             }
         }
 

@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { ActionDispatch } from "react";
 import type { AppState, Action } from "../store/store";
-import { createReplicaSet, scaleReplicaSet } from "../store/store";
+import { createReplicaSet, deleteReplicaSet, scaleReplicaSet } from "../store/store";
 
 /**
  * Computes a stable 7-char hex hash of a pod template's containers,
@@ -35,6 +35,24 @@ export function useDeploymentController(
     useEffect(() => {
         const timers: ReturnType<typeof setTimeout>[] = [];
 
+        // GC: clean up ReplicaSets whose owning Deployment has been deleted
+        for (const rs of ReplicaSets) {
+            const owner = rs.metadata.ownerReferences?.find(r => r.kind === "Deployment");
+            if (!owner) continue;
+            const ownerExists = Deployments.some(
+                d => d.metadata.name === owner.name && d.metadata.namespace === rs.metadata.namespace,
+            );
+            if (!ownerExists) {
+                if (rs.spec.replicas > 0) {
+                    // Scale to 0 so the RS controller cleans up pods first
+                    timers.push(setTimeout(() => dispatch(scaleReplicaSet(rs.metadata.name, 0, rs.metadata.namespace)), RECONCILE_DELAY_MS));
+                } else {
+                    // Pods already gone — delete the RS itself
+                    timers.push(setTimeout(() => dispatch(deleteReplicaSet(rs.metadata.name, rs.metadata.namespace)), RECONCILE_DELAY_MS));
+                }
+            }
+        }
+
         for (const deployment of Deployments) {
             const { name, namespace } = deployment.metadata;
             const containers = deployment.spec.template.spec.containers;
@@ -43,7 +61,7 @@ export function useDeploymentController(
 
             const ownedRSes = ReplicaSets.filter(
                 rs =>
-                    rs.metadata.annotations["ownerDeployment"] === name &&
+                    rs.metadata.ownerReferences?.some(r => r.kind === "Deployment" && r.name === name) &&
                     rs.metadata.namespace === namespace,
             );
 
@@ -55,7 +73,7 @@ export function useDeploymentController(
                         createReplicaSet({
                             name: expectedRsName,
                             namespace,
-                            ownerDeployment: name,
+                            ownerRef: { name, uid: deployment.metadata.uid },
                             replicas: deployment.spec.replicas,
                             selector: deployment.spec.selector,
                             containers,

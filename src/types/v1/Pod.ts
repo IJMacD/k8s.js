@@ -9,11 +9,14 @@ export interface PodTemplateSpec {
     spec: PodSpec;
 }
 
+import type { OwnerReference } from "./ObjectMeta";
+
 export interface PodTemplateMetadata {
     namespace: string;
     name: string;
-    labels?: Record<string, string>; // A map of {key: value} pairs to categorize the pod
-    annotations?: Record<string, string>; // A map of {key: value} pairs to store arbitrary metadata about the pod
+    labels?: Record<string, string>;
+    annotations?: Record<string, string>;
+    ownerReferences?: OwnerReference[];
 }
 
 export interface PodMetadata extends PodTemplateMetadata {

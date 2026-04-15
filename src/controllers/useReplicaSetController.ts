@@ -21,6 +21,18 @@ export function useReplicaSetController(
     useEffect(() => {
         const timers: ReturnType<typeof setTimeout>[] = [];
 
+        // GC: delete pods whose owning ReplicaSet has been deleted
+        for (const pod of Pods) {
+            const owner = pod.metadata.ownerReferences?.find(r => r.kind === "ReplicaSet");
+            if (!owner) continue;
+            const ownerExists = ReplicaSets.some(
+                rs => rs.metadata.name === owner.name && rs.metadata.namespace === pod.metadata.namespace,
+            );
+            if (!ownerExists) {
+                timers.push(setTimeout(() => dispatch(deletePod(pod.metadata.name, pod.metadata.namespace)), RECONCILE_DELAY_MS));
+            }
+        }
+
         for (const rs of ReplicaSets) {
             const { name, namespace } = rs.metadata;
             const desired = rs.spec.replicas;
@@ -28,7 +40,7 @@ export function useReplicaSetController(
             const ownedPods = Pods.filter(
                 p =>
                     p.metadata.namespace === namespace &&
-                    p.metadata.annotations?.["ownerReplicaSet"] === name,
+                    p.metadata.ownerReferences?.some(r => r.kind === "ReplicaSet" && r.name === name),
             );
 
             const actual = ownedPods.length;
@@ -48,7 +60,7 @@ export function useReplicaSetController(
                                 labels: rs.metadata.labels,
                             },
                             namespace,
-                            name,
+                            { kind: "ReplicaSet", apiVersion: "apps/v1", name: rs.metadata.name, uid: rs.metadata.uid },
                         ));
                     }, RECONCILE_DELAY_MS * (podIndex - actual + 1)));
                 }

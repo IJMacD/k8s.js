@@ -22,7 +22,7 @@ export function useStatusController(
             const ownedPods = Pods.filter(
                 p =>
                     p.metadata.namespace === namespace &&
-                    p.metadata.annotations?.["ownerReplicaSet"] === name,
+                    p.metadata.ownerReferences?.some(r => r.kind === "ReplicaSet" && r.name === name),
             );
 
             const replicas = ownedPods.length;
@@ -47,7 +47,7 @@ export function useStatusController(
             const ownedRSes = ReplicaSets.filter(
                 rs =>
                     rs.metadata.namespace === namespace &&
-                    rs.metadata.annotations["ownerDeployment"] === name,
+                    rs.metadata.ownerReferences?.some(r => r.kind === "Deployment" && r.name === name),
             );
 
             const readyReplicas = ownedRSes.reduce((sum, rs) => sum + rs.status.readyReplicas, 0);

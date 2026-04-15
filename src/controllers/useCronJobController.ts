@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { ActionDispatch } from "react";
 import type { AppState, Action } from "../store/store";
-import { createJob, updateCronJobStatus } from "../store/store";
+import { createJob, deleteJob, updateCronJobStatus } from "../store/store";
 
 // ---------------------------------------------------------------------------
 // Minimal cron parser — supports *, */n, and single numeric values per field.
@@ -70,7 +70,7 @@ export function useCronJobController(
     state: AppState,
     dispatch: ActionDispatch<[action: Action]>,
 ) {
-    const { CronJobs } = state;
+    const { CronJobs, Jobs } = state;
     // uid → cancel function for the pending timeout
     const schedulersRef = useRef<Map<string, () => void>>(new Map());
 
@@ -113,9 +113,9 @@ export function useCronJobController(
                                 completions: jobSpec.completions,
                                 parallelism: jobSpec.parallelism,
                                 backoffLimit: jobSpec.backoffLimit,
-                                ownerCronJob: name,
                             },
                             namespace,
+                            { kind: "CronJob", apiVersion: "batch/v1", name, uid: cj.metadata.uid },
                         ),
                     );
                     dispatch(
@@ -133,6 +133,20 @@ export function useCronJobController(
             scheduleNext();
         }
     }, [CronJobs, dispatch]);
+
+    // GC: delete Jobs whose owning CronJob has been deleted
+    useEffect(() => {
+        for (const job of Jobs) {
+            const owner = job.metadata.ownerReferences?.find(r => r.kind === "CronJob");
+            if (!owner) continue;
+            const ownerExists = CronJobs.some(
+                c => c.metadata.name === owner.name && c.metadata.namespace === job.metadata.namespace,
+            );
+            if (!ownerExists) {
+                dispatch(deleteJob(job.metadata.name, job.metadata.namespace));
+            }
+        }
+    }, [Jobs, CronJobs, dispatch]);
 
     // Cancel all pending timers on unmount
     useEffect(() => {

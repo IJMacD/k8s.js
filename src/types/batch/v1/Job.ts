@@ -1,4 +1,5 @@
 import type { PodTemplateSpec } from "../../v1/Pod";
+import type { OwnerReference } from "../../v1/ObjectMeta";
 
 // ---------------------------------------------------------------------------
 // Job
@@ -16,8 +17,8 @@ export interface JobMetadata {
     namespace: string;
     labels: Record<string, string>;
     annotations: Record<string, string>;
+    ownerReferences?: OwnerReference[];
     creationTimestamp: string;
-    ownerCronJob?: string;
 }
 
 export interface JobSpec {
