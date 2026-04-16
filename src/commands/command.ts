@@ -3,6 +3,7 @@ import { type Action, type AppState } from "../store/store";
 import { kubectl } from "./kubectl";
 import { ping } from "./ping";
 import { curl } from "./curl";
+import { nslookup } from "./nslookup";
 
 // Splits a command line into tokens, honouring single and double quotes so
 // that values containing spaces (e.g. --schedule='*/1 * * * *') are kept
@@ -60,6 +61,8 @@ export async function* command(
         yield* ping(args, getState());
     } else if (command === "curl") {
         yield curl(args, getState());
+    } else if (command === "nslookup") {
+        yield nslookup(args, getState());
     } else if (command === "kubectl") {
         yield* kubectl(args, dispatch, getState);
     } else {
