@@ -17,7 +17,6 @@ export function useReplicaSetController(
     dispatch: ActionDispatch<[action: Action]>,
 ) {
     const { ReplicaSets, Pods } = state;
-
     useEffect(() => {
         const timers: ReturnType<typeof setTimeout>[] = [];
 
@@ -96,13 +95,33 @@ export function useReplicaSetController(
             const readyReplicas = ownedPods.filter(
                 p => p.status.conditions?.find(c => c.type === "Ready")?.status === "True",
             ).length;
+
+            // minReadySeconds: a pod is "available" only after it has been ready for at least N seconds.
+            // Look up minReadySeconds from the owning Deployment (if any).
+            const ownerDeploy = rs.metadata.ownerReferences?.find(r => r.kind === "Deployment");
+            const minReadySeconds = ownerDeploy
+                ? (state.Deployments.find(
+                    d => d.metadata.name === ownerDeploy.name && d.metadata.namespace === namespace,
+                )?.spec.minReadySeconds ?? 0)
+                : 0;
+            const now = Date.now();
+            const availableReplicas = ownedPods.filter(p => {
+                const readyCond = p.status.conditions?.find(c => c.type === "Ready");
+                if (readyCond?.status !== "True") return false;
+                if (minReadySeconds <= 0) return true;
+                const readySince = readyCond.lastTransitionTime
+                    ? new Date(readyCond.lastTransitionTime).getTime()
+                    : (p.status.startTime ? new Date(p.status.startTime).getTime() : now);
+                return now - readySince >= minReadySeconds * 1000;
+            }).length;
+
             if (
                 rs.status.replicas !== replicas ||
                 rs.status.readyReplicas !== readyReplicas ||
-                rs.status.availableReplicas !== readyReplicas
+                rs.status.availableReplicas !== availableReplicas
             ) {
-                dispatch(updateReplicaSetStatus(name, namespace, { replicas, readyReplicas, availableReplicas: readyReplicas }));
+                dispatch(updateReplicaSetStatus(name, namespace, { replicas, readyReplicas, availableReplicas }));
             }
         }
-    }, [ReplicaSets, Pods, dispatch]);
+    }, [ReplicaSets, Pods, state.Deployments, dispatch]);
 }

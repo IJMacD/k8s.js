@@ -92,7 +92,15 @@ export type ActionType =
 
 export interface CreateDeploymentAction {
     type: typeof CreateDeploymentType;
-    payload: { name: string; namespace: string; replicas: number; template: import("../types/v1/Pod").PodTemplateSpec };
+    payload: {
+        name: string;
+        namespace: string;
+        replicas: number;
+        template: import("../types/v1/Pod").PodTemplateSpec;
+        strategy?: import("../types/apps/v1/Deployment").DeploymentStrategy;
+        revisionHistoryLimit?: number;
+        minReadySeconds?: number;
+    };
 }
 
 export interface CreatePodAction {
@@ -549,7 +557,13 @@ export function scaleDeployment(
 
 export function createDeployment(
     name: string,
-    spec: { replicas?: number; template: import("../types/v1/Pod").PodTemplateSpec },
+    spec: {
+        replicas?: number;
+        template: import("../types/v1/Pod").PodTemplateSpec;
+        strategy?: import("../types/apps/v1/Deployment").DeploymentStrategy;
+        revisionHistoryLimit?: number;
+        minReadySeconds?: number;
+    },
     namespace = "default",
 ): CreateDeploymentAction {
     return {
@@ -559,6 +573,9 @@ export function createDeployment(
             namespace,
             replicas: spec.replicas ?? 1,
             template: spec.template,
+            ...(spec.strategy !== undefined ? { strategy: spec.strategy } : {}),
+            ...(spec.revisionHistoryLimit !== undefined ? { revisionHistoryLimit: spec.revisionHistoryLimit } : {}),
+            ...(spec.minReadySeconds !== undefined ? { minReadySeconds: spec.minReadySeconds } : {}),
         },
     };
 }
@@ -681,7 +698,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
     }
     if (action.type === CreateDeploymentType) {
-        const { name, namespace, replicas, template } = action.payload;
+        const { name, namespace, replicas, template, strategy, revisionHistoryLimit, minReadySeconds } = action.payload;
         const creationTimestamp = new Date().toISOString();
         return {
             ...state,
@@ -701,7 +718,9 @@ export const reducer = (state: AppState, action: Action): AppState => {
                         replicas,
                         selector: { matchLabels: template.metadata.labels ?? { app: name } },
                         template,
-                        strategy: { type: "RollingUpdate" },
+                        strategy: strategy ?? { type: "RollingUpdate" },
+                        ...(revisionHistoryLimit !== undefined ? { revisionHistoryLimit } : {}),
+                        ...(minReadySeconds !== undefined ? { minReadySeconds } : {}),
                     },
                     status: {
                         observedGeneration: 1,
@@ -832,6 +851,24 @@ export const reducer = (state: AppState, action: Action): AppState => {
     }
     if (action.type === CreateServiceType) {
         const { name, namespace, selector, ports, clusterIP, serviceType } = action.payload;
+
+        // Auto-assign nodePorts for NodePort / LoadBalancer services.
+        // Track ports already occupied across all existing services.
+        const usedNodePorts = new Set(
+            state.Services.flatMap(s => s.spec.ports.map(p => p.nodePort).filter(Boolean) as number[])
+        );
+        const pickNodePort = (hint?: number): number => {
+            if (hint && hint >= 30000 && hint <= 32767 && !usedNodePorts.has(hint)) {
+                usedNodePorts.add(hint);
+                return hint;
+            }
+            for (let p = 30000; p <= 32767; p++) {
+                if (!usedNodePorts.has(p)) { usedNodePorts.add(p); return p; }
+            }
+            throw new Error("No free NodePort available in range 30000-32767");
+        };
+        const needsNodePort = serviceType === "NodePort" || serviceType === "LoadBalancer";
+
         const svc: Service = {
             metadata: {
                 uid: crypto.randomUUID(),
@@ -845,7 +882,13 @@ export const reducer = (state: AppState, action: Action): AppState => {
                 type: serviceType,
                 selector,
                 clusterIP,
-                ports: ports.map(p => ({ name: p.name, port: p.port, targetPort: p.targetPort, protocol: p.protocol ?? "TCP" })),
+                ports: ports.map(p => ({
+                    name: p.name,
+                    port: p.port,
+                    targetPort: p.targetPort,
+                    protocol: p.protocol ?? "TCP",
+                    ...(needsNodePort ? { nodePort: pickNodePort() } : {}),
+                })),
             },
             status: {},
         };

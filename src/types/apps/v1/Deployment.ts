@@ -29,6 +29,7 @@ export interface DeploymentSpec {
     template: PodTemplateSpec; // Template for the pods to be created
     strategy: DeploymentStrategy; // Strategy for updating the deployment
     revisionHistoryLimit?: number; // Optional limit on the number of old ReplicaSets to retain
+    minReadySeconds?: number; // Minimum seconds a newly created pod must be ready before it is considered available
 }
 
 export interface LabelSelector {

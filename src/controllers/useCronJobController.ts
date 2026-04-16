@@ -73,15 +73,25 @@ export function useCronJobController(
     const { CronJobs, Jobs } = state;
     // uid → cancel function for the pending timeout
     const schedulersRef = useRef<Map<string, () => void>>(new Map());
+    // Always-current state snapshot for use inside timer callbacks
+    const stateRef = useRef<AppState>(state);
+    stateRef.current = state;
 
     useEffect(() => {
         const knownUids = new Set(CronJobs.map(c => c.metadata.uid));
 
-        // Cancel schedulers for removed CronJobs
+        // Cancel schedulers for removed or newly-suspended CronJobs
         for (const [uid, cancel] of schedulersRef.current) {
             if (!knownUids.has(uid)) {
                 cancel();
                 schedulersRef.current.delete(uid);
+            }
+        }
+        for (const cj of CronJobs) {
+            if (!cj.spec.suspend) continue;
+            if (schedulersRef.current.has(cj.metadata.uid)) {
+                schedulersRef.current.get(cj.metadata.uid)!();
+                schedulersRef.current.delete(cj.metadata.uid);
             }
         }
 
@@ -91,7 +101,7 @@ export function useCronJobController(
             if (cj.spec.suspend) continue;
 
             const { name, namespace } = cj.metadata;
-            const { schedule, jobTemplate } = cj.spec;
+            const { schedule, jobTemplate, concurrencyPolicy = "Allow" } = cj.spec;
             const jobSpec = jobTemplate.spec;
 
             function scheduleNext() {
@@ -104,25 +114,45 @@ export function useCronJobController(
 
                 const delay = Math.max(0, next.getTime() - Date.now());
                 const id = setTimeout(() => {
-                    const jobName = `${name}-${crypto.randomUUID().slice(0, 5)}`;
-                    dispatch(
-                        createJob(
-                            jobName,
-                            {
-                                completions: jobSpec.completions,
-                                parallelism: jobSpec.parallelism,
-                                backoffLimit: jobSpec.backoffLimit,
-                                template: jobSpec.template,
-                            },
-                            namespace,
-                            { kind: "CronJob", apiVersion: "batch/v1", name, uid: cj.metadata.uid },
-                        ),
+                    const liveState = stateRef.current;
+
+                    // Find active (incomplete) jobs owned by this CronJob
+                    const activeJobs = liveState.Jobs.filter(j =>
+                        j.metadata.ownerReferences?.some(r => r.kind === "CronJob" && r.name === name) &&
+                        j.metadata.namespace === namespace &&
+                        !j.status.conditions.some(c => (c.type === "Complete" || c.type === "Failed") && c.status === "True"),
                     );
-                    dispatch(
-                        updateCronJobStatus(name, namespace, {
-                            lastScheduleTime: new Date().toISOString(),
-                        }),
-                    );
+
+                    if (concurrencyPolicy === "Forbid" && activeJobs.length > 0) {
+                        // Skip this tick — do NOT create a new Job
+                    } else {
+                        if (concurrencyPolicy === "Replace" && activeJobs.length > 0) {
+                            // Delete all currently-active Jobs before spawning the new one
+                            for (const old of activeJobs) {
+                                dispatch(deleteJob(old.metadata.name, old.metadata.namespace));
+                            }
+                        }
+                        const jobName = `${name}-${crypto.randomUUID().slice(0, 5)}`;
+                        dispatch(
+                            createJob(
+                                jobName,
+                                {
+                                    completions: jobSpec.completions,
+                                    parallelism: jobSpec.parallelism,
+                                    backoffLimit: jobSpec.backoffLimit,
+                                    template: jobSpec.template,
+                                },
+                                namespace,
+                                { kind: "CronJob", apiVersion: "batch/v1", name, uid: cj.metadata.uid },
+                            ),
+                        );
+                        dispatch(
+                            updateCronJobStatus(name, namespace, {
+                                lastScheduleTime: new Date().toISOString(),
+                            }),
+                        );
+                    }
+
                     scheduleNext();
                 }, delay);
 

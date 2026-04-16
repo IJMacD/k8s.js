@@ -112,9 +112,23 @@ export async function* kubectlApply(
                 const template = parseTemplate(spec?.template, name, docNs);
                 const image = template.spec.containers[0]?.image ?? "";
                 const replicas = typeof spec?.replicas === "number" ? spec.replicas : 1;
+                const revisionHistoryLimit = typeof spec?.revisionHistoryLimit === "number" ? spec.revisionHistoryLimit : undefined;
+                const minReadySeconds = typeof spec?.minReadySeconds === "number" ? spec.minReadySeconds : undefined;
+                const rawStrategy = spec?.strategy as Record<string, unknown> | undefined;
+                const strategy = rawStrategy?.type === "Recreate"
+                    ? { type: "Recreate" as const }
+                    : rawStrategy?.type === "RollingUpdate"
+                        ? {
+                            type: "RollingUpdate" as const,
+                            rollingUpdate: {
+                                maxUnavailable: String((rawStrategy.rollingUpdate as Record<string, unknown> | undefined)?.maxUnavailable ?? "25%"),
+                                maxSurge: String((rawStrategy.rollingUpdate as Record<string, unknown> | undefined)?.maxSurge ?? "25%"),
+                            },
+                        }
+                        : undefined;
                 if (!state.Deployments.some(d => d.metadata.name === name && d.metadata.namespace === docNs)) {
                     if (!image) throw Error(`kubectl apply: Deployment "${name}": containers[0].image is required`);
-                    dispatch(createDeployment(name, { replicas, template }, docNs));
+                    dispatch(createDeployment(name, { replicas, template, strategy, revisionHistoryLimit, minReadySeconds }, docNs));
                     yield `deployment.apps/${name} created`;
                 } else {
                     dispatch(patchResource("deployment", name, { spec }, docNs));

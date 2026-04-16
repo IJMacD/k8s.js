@@ -232,7 +232,7 @@ export function ResourceTabs({ Deployments, DaemonSets, StatefulSets, ReplicaSet
                     <td>{s.metadata.name}</td>
                     <td>{s.spec.type}</td>
                     <td>{s.spec.clusterIP}</td>
-                    <td>{s.spec.ports.map(p => `${p.port}/TCP`).join(', ')}</td>
+                    <td>{s.spec.ports.map(p => p.nodePort ? `${p.port}:${p.nodePort}/${p.protocol ?? 'TCP'}` : `${p.port}/${p.protocol ?? 'TCP'}`).join(', ')}</td>
                     <td>{endpoints.length > 0 ? endpoints.join(', ') : '—'}</td>
                     <AgeCell timestamp={s.metadata.creationTimestamp} />
                   </tr>

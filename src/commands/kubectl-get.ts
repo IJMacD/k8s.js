@@ -188,15 +188,20 @@ export async function* kubectlGet(
             if (name && items.length === 0)
                 throw Error(`Error from server (NotFound): services "${name}" not found`);
             const headers = [...nsHdr, "NAME", "TYPE", "CLUSTER-IP", "EXTERNAL-IP", "PORT(S)", "AGE"];
-            const rows = items.map(s => [
-                ...nsCol(s.metadata.namespace),
-                s.metadata.name,
-                s.spec.type,
-                s.spec.clusterIP,
-                "<none>",
-                s.spec.ports.map(p => `${p.port}/TCP`).join(","),
-                ageStr(s.metadata.creationTimestamp),
-            ]);
+            const rows = items.map(s => {
+                const externalIP = s.spec.type === "LoadBalancer"
+                    ? (s.status?.loadBalancer?.ingress?.[0]?.ip ?? "<pending>")
+                    : "<none>";
+                return [
+                    ...nsCol(s.metadata.namespace),
+                    s.metadata.name,
+                    s.spec.type,
+                    s.spec.clusterIP,
+                    externalIP,
+                    s.spec.ports.map(p => p.nodePort ? `${p.port}:${p.nodePort}/${p.protocol ?? "TCP"}` : `${p.port}/${p.protocol ?? "TCP"}`).join(","),
+                    ageStr(s.metadata.creationTimestamp),
+                ];
+            });
             return fmtTable(headers, rows);
         }
         if (type === "endpoints" || type === "endpoint" || type === "ep") {
