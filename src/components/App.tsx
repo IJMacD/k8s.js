@@ -6,7 +6,7 @@ import { Browser } from './Browser'
 import { Editor } from './Editor'
 import { reducer, type Action, type AppState } from '../store/store';
 import { command } from '../commands/command';
-import { stageUpload } from '../commands/kubectl-apply';
+import { writeFile } from '../commands/filesystem';
 import { ResourceTabs } from './ResourceTabs';
 import { useDeploymentController } from '../controllers/useDeploymentController';
 import { useReplicaSetController } from '../controllers/useReplicaSetController';
@@ -84,7 +84,7 @@ function App() {
     const file = e.target.files?.[0];
     if (!file) return;
     file.text().then(content => {
-      stageUpload(file.name, content);
+      writeFile(file.name, content);
       setBottomTab('terminal');
       consoleRef.current?.submitCommand(`kubectl apply -f ${file.name}`);
       // Reset so the same file can be re-applied

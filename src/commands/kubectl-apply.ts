@@ -11,19 +11,7 @@ import {
     type Action,
     type AppState,
 } from "../store/store";
-
-/** Temporary buffer for file contents staged by the browser file-upload UI */
-const uploadBuffer = new Map<string, string>();
-
-export function stageUpload(filename: string, content: string): void {
-    uploadBuffer.set(filename, content);
-}
-
-export function consumeUpload(filename: string): string | undefined {
-    const content = uploadBuffer.get(filename);
-    uploadBuffer.delete(filename);
-    return content;
-}
+import { readFile } from "./filesystem";
 
 /** Parse the containers array out of a raw pod spec object, normalising types */
 function parseContainers(podSpec: unknown): Container[] | undefined {
@@ -87,7 +75,7 @@ export async function* kubectlApply(
     }
     if (!filename) throw Error("kubectl apply: -f <file> is required");
 
-    const content = consumeUpload(filename);
+    const content = readFile(filename);
     if (content === undefined) throw Error(`kubectl apply: cannot read file: ${filename}`);
 
     const { loadAll } = await import("js-yaml");

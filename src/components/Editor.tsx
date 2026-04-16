@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react';
 import type { ActionDispatch } from 'react';
 import type { Action, AppState } from '../store/store';
-import { stageUpload, kubectlApply } from '../commands/kubectl-apply';
+import { kubectlApply } from '../commands/kubectl-apply';
+import { writeFile } from '../commands/filesystem';
 
 interface EditorProps {
   state: AppState;
@@ -41,7 +42,7 @@ export function Editor({ state, dispatch, initialContent, namespace, onClose }: 
     setApplying(true);
     setOutput([]);
     try {
-      stageUpload('_editor.yaml', content);
+      writeFile('_editor.yaml', content);
       const lines: string[] = [];
       for await (const line of kubectlApply(['-f', '_editor.yaml'], namespace, state, dispatch)) {
         lines.push(line);

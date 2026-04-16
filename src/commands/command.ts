@@ -4,6 +4,7 @@ import { kubectl } from "./kubectl";
 import { ping } from "./ping";
 import { curl } from "./curl";
 import { nslookup } from "./nslookup";
+import { listFiles, readFile } from "./filesystem";
 
 // Splits a command line into tokens, honouring single and double quotes so
 // that values containing spaces (e.g. --schedule='*/1 * * * *') are kept
@@ -60,6 +61,22 @@ export async function* command(
         }
     } else if (command === "ping") {
         yield* ping(args, getState());
+    } else if (command === "ls") {
+        const files = listFiles();
+        if (files.length > 0) {
+            for (const name of files) yield name;
+        }
+    } else if (command === "cat") {
+        if (!args[0]) {
+            yield "cat: missing filename";
+        } else {
+            const content = readFile(args[0]);
+            if (content === undefined) {
+                yield `cat: ${args[0]}: No such file`;
+            } else {
+                yield content;
+            }
+        }
     } else if (command === "curl") {
         yield curl(args, getState());
     } else if (command === "nslookup") {
