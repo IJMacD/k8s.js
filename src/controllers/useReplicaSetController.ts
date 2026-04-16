@@ -53,7 +53,7 @@ export function useReplicaSetController(
                         dispatch(createPod(
                             podName,
                             {
-                                metadata: { labels: rs.metadata.labels },
+                                metadata: { labels: rs.spec.template.metadata?.labels },
                                 spec: rs.spec.template.spec,
                             },
                             namespace,
