@@ -178,7 +178,17 @@ function resolve(host: string, portHint: number, state: AppState): ResolveResult
         return resolveViaService(svcByName.metadata.name, svcByName.metadata.namespace, portHint, state);
     }
 
-    // --- 4. NodePort: <node-ip>:<nodePort> or <node-name>:<nodePort> ---
+    // --- 4. LoadBalancer ingress IP or hostname ---
+    for (const svc of Services) {
+        if (svc.spec.type !== "LoadBalancer") continue;
+        const ingress = svc.status.loadBalancer?.ingress ?? [];
+        const matched = ingress.some(i => i.ip === host || i.hostname === host);
+        if (matched) {
+            return resolveViaService(svc.metadata.name, svc.metadata.namespace, portHint, state);
+        }
+    }
+
+    // --- 5. NodePort: <node-ip>:<nodePort> or <node-name>:<nodePort> ---
     const isNode = state.Nodes.some(
         n => n.metadata.name === host || n.status.addresses.some(a => a.address === host),
     );

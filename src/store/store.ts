@@ -869,6 +869,18 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
         const needsNodePort = serviceType === "NodePort" || serviceType === "LoadBalancer";
 
+        // Auto-assign a 203.0.113.x LoadBalancer ingress IP (RFC 5737 TEST-NET-3).
+        const usedLbIps = new Set(
+            state.Services.flatMap(s => s.status.loadBalancer?.ingress?.map(i => i.ip).filter(Boolean) as string[] ?? [])
+        );
+        const pickLbIP = (): string => {
+            for (let octet = 1; octet <= 254; octet++) {
+                const ip = `203.0.113.${octet}`;
+                if (!usedLbIps.has(ip)) return ip;
+            }
+            return "203.0.113.255";
+        };
+
         const svc: Service = {
             metadata: {
                 uid: crypto.randomUUID(),
@@ -890,7 +902,9 @@ export const reducer = (state: AppState, action: Action): AppState => {
                     ...(needsNodePort ? { nodePort: pickNodePort() } : {}),
                 })),
             },
-            status: {},
+            status: serviceType === "LoadBalancer"
+                ? { loadBalancer: { ingress: [{ ip: pickLbIP() }] } }
+                : {},
         };
         const initialEndpoints: Endpoints = {
             metadata: { name, namespace },
