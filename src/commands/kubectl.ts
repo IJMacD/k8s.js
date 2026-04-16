@@ -15,6 +15,7 @@ import { kubectlRollout } from "./kubectl-rollout";
 import { kubectlScale } from "./kubectl-scale";
 import { kubectlLabel } from "./kubectl-label";
 import { kubectlAnnotate } from "./kubectl-annotate";
+import { kubectlLogs } from "./kubectl-logs";
 import { kubectlSet } from "./kubectl-set";
 
 /**
@@ -96,6 +97,10 @@ export async function* kubectl(
 
     if (args[0] === "delete") {
         yield* kubectlDelete(args, namespace, state, dispatch);
+        return;
+    }
+    if (args[0] === "logs") {
+        yield* kubectlLogs(args, namespace, state);
         return;
     }
     throw Error(`kubectl: Unknown subcommand ${args[0]}`);
