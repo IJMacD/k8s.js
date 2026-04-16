@@ -100,7 +100,8 @@ export function useScheduler(
         );
 
         for (const pod of unscheduled) {
-            scheduledRef.current.add(pod.metadata.uid);
+            // NOTE: do NOT add to scheduledRef here — only mark when we actually bind,
+            // so that pods which can't be placed now are retried when state changes.
 
             // Filter by nodeSelector: only consider nodes that match all required labels
             const nodeSelector = pod.spec.nodeSelector;
@@ -119,6 +120,9 @@ export function useScheduler(
             );
 
             if (eligibleNodes.length === 0) continue; // No node can satisfy requests; pod stays Pending
+
+            // Mark as being scheduled now (prevents duplicate binds during the timer window)
+            scheduledRef.current.add(pod.metadata.uid);
 
             // Least-loaded: pick node with fewest pods currently assigned
             const chosen = eligibleNodes.reduce((best, node) => {

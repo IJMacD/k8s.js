@@ -324,6 +324,14 @@ export async function* kubectlDescribe(
                         `    Restart Count:  0`,
                     ];
                 default:
+                    // Unscheduled (no nodeName yet): container has not started creating
+                    if (!pod.spec.nodeName) {
+                        return [...base,
+                            `    State:          Waiting`,
+                            `    Ready:          False`,
+                            `    Restart Count:  0`,
+                        ];
+                    }
                     return [...base,
                         `    State:          Waiting`,
                         `      Reason:       ContainerCreating`,
@@ -340,7 +348,20 @@ export async function* kubectlDescribe(
                 `  Type    Reason      Age      From               Message`,
                 `  ----    ------      ----     ----               -------`,
             ];
-            if (!pod.spec.nodeName) return [`Events:  <none>`];
+            if (!pod.spec.nodeName) {
+                const readyNodeCount = state.Nodes.filter(
+                    n => !n.spec.unschedulable &&
+                        n.status.conditions.find(c => c.type === "Ready")?.status === "True",
+                ).length;
+                const total = state.Nodes.length;
+                const msg = total === 0
+                    ? `no nodes available to schedule pods`
+                    : `0/${readyNodeCount} nodes are available: insufficient cpu or memory.`;
+                return [
+                    ...header,
+                    `  Warning  FailedScheduling  <unk>    default-scheduler  ${msg}`,
+                ];
+            }
             const nodeName = pod.spec.nodeName;
             const image = pod.spec.containers[0]?.image ?? "";
             const containerName = pod.spec.containers[0]?.name ?? "";
@@ -372,7 +393,17 @@ export async function* kubectlDescribe(
             `Conditions:`,
             `  Type              Status`,
             `  ----              ------`,
-            ...(pod.status.conditions?.map(c => `  ${c.type.padEnd(17)} ${c.status}`) ?? [`  <none>`]),
+            ...((): string[] => {
+                const stored = pod.status.conditions ?? [];
+                const hasPodScheduled = stored.some(c => c.type === "PodScheduled");
+                // Synthesize PodScheduled: False for pods the scheduler hasn't placed yet
+                const conditions = (!pod.spec.nodeName && !hasPodScheduled)
+                    ? [{ type: "PodScheduled", status: "False" as const }, ...stored]
+                    : stored;
+                return conditions.length > 0
+                    ? conditions.map(c => `  ${c.type.padEnd(17)} ${c.status}`)
+                    : [`  <none>`];
+            })(),
             ``,
             `QoS Class:        BestEffort`,
             `Node-Selectors:   <none>`,
