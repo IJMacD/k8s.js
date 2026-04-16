@@ -41,6 +41,10 @@ export const Console = forwardRef<ConsoleHandle, { onCommand: (command: string) 
     const handleInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
         setInput(event.target.value);
         autoResize(event.target);
+        // Jump back to the bottom when the user starts typing
+        if (outputRef.current) {
+            outputRef.current.scrollTop = outputRef.current.scrollHeight;
+        }
     };
 
     const submitInput = () => {
@@ -171,18 +175,18 @@ export const Console = forwardRef<ConsoleHandle, { onCommand: (command: string) 
                 {output.map((line, index) => (
                     <div key={index} style={{ whiteSpace: 'pre-wrap' }}>{line || '\u00a0'}</div>
                 ))}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'flex-start', padding: '0 5px', flexShrink: 0, visibility: inputQueue.length > 0 ? 'hidden' : 'visible' }}>
-                <span style={{ paddingTop: '4px', lineHeight: '1.5' }}>{PROMPT}</span>
-                <textarea
-                    value={input}
-                    onChange={handleInputChange}
-                    onKeyDown={handleKeyDown}
-                    rows={1}
-                    style={{ padding: '4px', marginLeft: '4px', backgroundColor: '#1e1e1e', color: '#d4d4d4', border: 'none', outline: 'none', flex: 1, fontFamily: 'monospace', fontSize: '16px', resize: 'none', overflow: 'hidden', lineHeight: '1.5' }}
-                    autoFocus
-                    ref={inputRef}
-                />
+                <div style={{ display: 'flex', alignItems: 'flex-start', visibility: inputQueue.length > 0 ? 'hidden' : 'visible' }}>
+                    <span style={{ paddingTop: '4px', lineHeight: '1.5' }}>{PROMPT}</span>
+                    <textarea
+                        value={input}
+                        onChange={handleInputChange}
+                        onKeyDown={handleKeyDown}
+                        rows={1}
+                        style={{ padding: '4px', marginLeft: '4px', backgroundColor: '#1e1e1e', color: '#d4d4d4', border: 'none', outline: 'none', flex: 1, fontFamily: 'monospace', fontSize: '16px', resize: 'none', overflow: 'hidden', lineHeight: '1.5' }}
+                        autoFocus
+                        ref={inputRef}
+                    />
+                </div>
             </div>
         </div>
     );
