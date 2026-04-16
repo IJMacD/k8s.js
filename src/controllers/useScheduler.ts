@@ -139,6 +139,10 @@ export function useScheduler(
 
     useEffect(() => {
         const timers = timersRef.current;
-        return () => timers.forEach(clearTimeout);
+        const scheduled = scheduledRef.current;
+        return () => {
+            timers.forEach(clearTimeout);
+            scheduled.clear();
+        };
     }, []);
 }

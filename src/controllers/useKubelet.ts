@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 import type { ActionDispatch } from "react";
-import type { PodCondition } from "../types/v1/Pod";
 import type { AppState, Action } from "../store/store";
 import { updatePodStatus } from "../store/store";
 
@@ -28,52 +27,62 @@ export function useKubelet(
     useEffect(() => {
         for (const pod of Pods) {
             const uid = pod.metadata.uid;
-            if (scheduledRef.current.has(uid)) continue;
             // Only drive Pending pods that have been bound to a node
             if (pod.status.phase !== "Pending") continue;
             if (!pod.spec.nodeName) continue;
 
+            // Determine how far through the lifecycle this pod has already progressed,
+            // so timers for already-completed transitions are skipped.
+            // This makes the kubelet idempotent across re-renders and page restores —
+            // no external scheduledRef tracking needed.
+            const conditions = pod.status.conditions ?? [];
+            const hasScheduled    = conditions.some(c => c.type === "PodScheduled"    && c.status === "True");
+            const hasInitialized  = conditions.some(c => c.type === "Initialized"     && c.status === "True");
+            const hasReady        = conditions.some(c => c.type === "ContainersReady" && c.status === "True");
+
+            // Already fully transitioned — nothing to do (phase update from a prior run
+            // may just not have persisted yet; skip to avoid double-scheduling).
+            if (hasReady) continue;
+
+            // Guard against scheduling the same pod's transitions more than once per mount.
+            // This still uses scheduledRef, but it is now a secondary guard, not the
+            // primary source of truth. The conditions above are the real gate.
+            if (scheduledRef.current.has(uid)) continue;
             scheduledRef.current.add(uid);
 
             const { name, namespace } = pod.metadata;
 
-            function setConditions(conditions: PodCondition[]) {
-                return (prev: PodCondition[] = []) => {
-                    const merged = [...prev];
-                    for (const c of conditions) {
-                        const idx = merged.findIndex(x => x.type === c.type);
-                        if (idx >= 0) merged[idx] = c;
-                        else merged.push(c);
-                    }
-                    return merged;
-                };
-            }
-
             const now = () => new Date().toISOString();
 
-            // t+1.0s: PodScheduled
-            timersRef.current.push(setTimeout(() => {
-                dispatch(updatePodStatus(name, namespace, {
-                    conditions: setConditions([
-                        { type: "PodScheduled", status: "True", lastTransitionTime: now() },
-                    ])(pod.status.conditions),
-                }));
-            }, 1_000));
+            // t+1.0s: PodScheduled (skip if already set)
+            if (!hasScheduled) {
+                timersRef.current.push(setTimeout(() => {
+                    dispatch(updatePodStatus(name, namespace, {
+                        conditions: [
+                            { type: "PodScheduled", status: "True", lastTransitionTime: now() },
+                        ],
+                    }));
+                }, 1_000));
+            }
 
-            // t+2.0s: Initialized
-            timersRef.current.push(setTimeout(() => {
-                dispatch(updatePodStatus(name, namespace, {
-                    conditions: setConditions([
-                        { type: "PodScheduled", status: "True", lastTransitionTime: now() },
-                        { type: "Initialized",  status: "True", lastTransitionTime: now() },
-                    ])(pod.status.conditions),
-                }));
-            }, 2_000));
+            // t+2.0s: Initialized (skip if already set)
+            if (!hasInitialized) {
+                timersRef.current.push(setTimeout(() => {
+                    dispatch(updatePodStatus(name, namespace, {
+                        conditions: [
+                            ...(hasScheduled
+                                ? conditions.filter(c => c.type === "PodScheduled")
+                                : [{ type: "PodScheduled", status: "True" as const, lastTransitionTime: now() }]),
+                            { type: "Initialized", status: "True", lastTransitionTime: now() },
+                        ],
+                    }));
+                }, hasScheduled ? 1_000 : 2_000));
+            }
 
-            // t+3.5s: Running + Ready
+            // t+3.5s (or sooner if earlier stages were already done): Running + Ready
             const node = Nodes.find(n => n.metadata.name === pod.spec.nodeName);
-            // Pods with OnFailure or Never restart policy run to completion (Succeeded) after a short delay
             const isBatch = pod.spec.restartPolicy === "OnFailure" || pod.spec.restartPolicy === "Never";
+            const runningDelay = hasInitialized ? 1_500 : hasScheduled ? 2_500 : 3_500;
             timersRef.current.push(setTimeout(() => {
                 const startTime = now();
                 const podIP = node?.spec.podCIDR
@@ -99,22 +108,30 @@ export function useKubelet(
                         dispatch(updatePodStatus(name, namespace, {
                             phase: "Succeeded",
                             conditions: [
-                                { type: "PodScheduled", status: "True", lastTransitionTime: startTime },
-                                { type: "Initialized", status: "True", lastTransitionTime: startTime },
+                                { type: "PodScheduled",    status: "True",  lastTransitionTime: startTime },
+                                { type: "Initialized",     status: "True",  lastTransitionTime: startTime },
                                 { type: "ContainersReady", status: "False", lastTransitionTime: completionTime },
-                                { type: "Ready", status: "False", lastTransitionTime: completionTime },
+                                { type: "Ready",           status: "False", lastTransitionTime: completionTime },
                             ],
                         }));
                     }, 2_000));
                 }
-            }, 3_500));
+            }, runningDelay));
         }
     }, [Pods, Nodes, dispatch]);
 
-    // Clear timers only on unmount
+    // Clear timers and tracking state on unmount.
+    // scheduledRef must also be reset so that React Strict Mode's
+    // simulated unmount/remount cycle doesn't leave pending pods
+    // stranded — timers are cancelled on the simulated unmount but
+    // the Set survives it, causing pods to be skipped on remount.
     useEffect(() => {
         const timers = timersRef.current;
-        return () => timers.forEach(clearTimeout);
+        const scheduled = scheduledRef.current;
+        return () => {
+            timers.forEach(clearTimeout);
+            scheduled.clear();
+        };
     }, []);
 }
 
