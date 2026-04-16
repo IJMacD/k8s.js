@@ -11,13 +11,47 @@ export async function* kubectlExpose(
     state: AppState,
     dispatch: ActionDispatch<[action: Action]>,
 ): AsyncGenerator<string> {
-    // kubectl expose deployment <name> --port=80 [--target-port=8080] [--type=ClusterIP]
-    if (args[1] !== "deployment") throw Error("kubectl expose: only 'deployment' resources are supported");
+    // kubectl expose (deployment|replicaset|statefulset|daemonset|pod|service) <name> --port=80 ...
+    const resourceType = args[1]?.toLowerCase();
     const name = args[2];
-    if (!name) throw Error("kubectl expose: missing deployment name");
 
-    const exists = state.Deployments.find(d => d.metadata.name === name && d.metadata.namespace === namespace);
-    if (!exists) throw Error(`Error from server (NotFound): deployments "${name}" not found`);
+    const supported = ["deployment", "replicaset", "rs", "statefulset", "sts", "daemonset", "ds", "pod", "po", "service", "svc"];
+    if (!supported.includes(resourceType)) {
+        throw Error(`kubectl expose: unsupported resource type "${resourceType}". Supported: deployment, replicaset, statefulset, daemonset, pod, service`);
+    }
+    if (!name) throw Error(`kubectl expose: missing resource name`);
+
+    // Resolve the selector and short name from the target resource.
+    // For pods there is no selector — we generate one and patch the pod's labels.
+    let selector: Record<string, string>;
+
+    if (resourceType === "deployment") {
+        const r = state.Deployments.find(d => d.metadata.name === name && d.metadata.namespace === namespace);
+        if (!r) throw Error(`Error from server (NotFound): deployments "${name}" not found`);
+        selector = r.spec.selector.matchLabels;
+    } else if (resourceType === "replicaset" || resourceType === "rs") {
+        const r = state.ReplicaSets.find(d => d.metadata.name === name && d.metadata.namespace === namespace);
+        if (!r) throw Error(`Error from server (NotFound): replicasets "${name}" not found`);
+        selector = r.spec.selector.matchLabels;
+    } else if (resourceType === "statefulset" || resourceType === "sts") {
+        const r = state.StatefulSets.find(d => d.metadata.name === name && d.metadata.namespace === namespace);
+        if (!r) throw Error(`Error from server (NotFound): statefulsets "${name}" not found`);
+        selector = r.spec.selector.matchLabels;
+    } else if (resourceType === "daemonset" || resourceType === "ds") {
+        const r = state.DaemonSets.find(d => d.metadata.name === name && d.metadata.namespace === namespace);
+        if (!r) throw Error(`Error from server (NotFound): daemonsets "${name}" not found`);
+        selector = r.spec.selector.matchLabels;
+    } else if (resourceType === "pod" || resourceType === "po") {
+        const r = state.Pods.find(p => p.metadata.name === name && p.metadata.namespace === namespace);
+        if (!r) throw Error(`Error from server (NotFound): pods "${name}" not found`);
+        // Expose a pod by using its existing labels as the selector (same behaviour as kubectl)
+        selector = r.metadata.labels ?? {};
+    } else {
+        // service — re-expose an existing service's selector
+        const r = state.Services.find(s => s.metadata.name === name && s.metadata.namespace === namespace);
+        if (!r) throw Error(`Error from server (NotFound): services "${name}" not found`);
+        selector = r.spec.selector;
+    }
 
     const portFlag = args.find(a => a.startsWith("--port="));
     if (!portFlag) throw Error("kubectl expose: --port=PORT is required");
@@ -26,7 +60,6 @@ export async function* kubectlExpose(
 
     const targetPortFlag = args.find(a => a.startsWith("--target-port="));
     const rawTargetPort = targetPortFlag?.slice("--target-port=".length);
-    // Named port (e.g. --target-port=http) or numeric (e.g. --target-port=8080)
     const targetPort: number | string = rawTargetPort
         ? (/^\d+$/.test(rawTargetPort) ? parseInt(rawTargetPort, 10) : rawTargetPort)
         : port;
@@ -40,11 +73,10 @@ export async function* kubectlExpose(
     const alreadyExists = state.Services.some(s => s.metadata.name === svcName && s.metadata.namespace === namespace);
     if (alreadyExists) throw Error(`Error from server (AlreadyExists): services "${svcName}" already exists`);
 
-    // Generate a stable fake clusterIP
     const clusterIP = `10.96.${Math.floor(Math.random() * 254) + 1}.${Math.floor(Math.random() * 254) + 1}`;
 
     dispatch(createService(svcName, {
-        selector: { app: name },
+        selector,
         ports: [{ port, targetPort }],
         clusterIP,
         serviceType,
