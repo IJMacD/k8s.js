@@ -902,7 +902,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
                     ...(needsNodePort ? { nodePort: pickNodePort() } : {}),
                 })),
             },
-            status: serviceType === "LoadBalancer"
+            status: serviceType === "LoadBalancer" && clusterIP !== "None"
                 ? { loadBalancer: { ingress: [{ ip: pickLbIP() }] } }
                 : {},
         };

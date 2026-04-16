@@ -150,7 +150,9 @@ export async function* kubectlApply(
                 const selector = (spec?.selector ?? {}) as Record<string, string>;
                 const serviceType = (typeof spec?.type === "string" ? spec.type : "ClusterIP") as import("../types/v1/Service").ServiceType;
                 if (!state.Services.some(s => s.metadata.name === name && s.metadata.namespace === docNs)) {
-                    const clusterIP = `10.96.${Math.floor(Math.random() * 254) + 1}.${Math.floor(Math.random() * 254) + 1}`;
+                    const clusterIP = spec?.clusterIP === "None"
+                        ? "None"
+                        : `10.96.${Math.floor(Math.random() * 254) + 1}.${Math.floor(Math.random() * 254) + 1}`;
                     dispatch(createService(name, { selector, ports, clusterIP, serviceType }, docNs));
                     yield `service/${name} created`;
                 } else {

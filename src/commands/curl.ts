@@ -156,6 +156,47 @@ function resolve(host: string, portHint: number, state: AppState): ResolveResult
         return resolveViaService(svcByIP.metadata.name, svcByIP.metadata.namespace, portHint, state);
     }
 
+    // --- 3a. Pod-specific DNS: <pod>.<svc>.<ns>.svc[.cluster[.local]] ---
+    // Used by StatefulSets and headless services for per-pod addressing.
+    const podDnsPatterns = [
+        /^(?<pod>[^.]+)\.(?<svc>[^.]+)\.(?<ns>[^.]+)\.svc\.cluster\.local$/,
+        /^(?<pod>[^.]+)\.(?<svc>[^.]+)\.(?<ns>[^.]+)\.svc\.cluster$/,
+        /^(?<pod>[^.]+)\.(?<svc>[^.]+)\.(?<ns>[^.]+)\.svc$/,
+    ];
+    for (const pattern of podDnsPatterns) {
+        const m = host.match(pattern);
+        if (m?.groups) {
+            const { pod, svc, ns } = m.groups;
+            // Per-pod DNS records under a service only exist for headless services (clusterIP: None).
+            const headlessSvc = Services.find(
+                s => s.metadata.name === svc && s.metadata.namespace === ns && s.spec.clusterIP === "None",
+            );
+            if (!headlessSvc) continue;
+            const targetPod = Pods.find(p => p.metadata.name === pod && p.metadata.namespace === ns);
+            if (targetPod) {
+                // Route via the pod's IP directly (headless semantics — no VIP)
+                const containerPorts = targetPod.spec.containers.flatMap(c => c.ports?.map(p => p.containerPort) ?? []);
+                const image = targetPod.spec.containers[0]?.image ?? "";
+                const allowedPorts = containerPorts.length > 0 ? containerPorts : defaultPortsForImage(image);
+                if (allowedPorts.length > 0 && !allowedPorts.includes(portHint)) {
+                    return { ok: false, reason: "port_refused", port: portHint };
+                }
+                return {
+                    ok: true,
+                    target: {
+                        podName: targetPod.metadata.name,
+                        podNamespace: targetPod.metadata.namespace,
+                        image,
+                        phase: targetPod.status.phase,
+                        port: portHint,
+                        dialIP: targetPod.status.podIP ?? "",
+                        resolvedIP: targetPod.status.podIP ?? "",
+                    },
+                };
+            }
+        }
+    }
+
     // --- 3. DNS: <svc>, <svc>.<ns>, <svc>.<ns>.svc.cluster.local ---
     // Also support <svc>.<ns>.svc, <svc>.<ns>.svc.cluster
     const dnsPatterns = [
@@ -253,7 +294,8 @@ function resolveViaService(svcName: string, svcNs: string, portHint: number, sta
                 image: pod.spec.containers[0]?.image ?? "",
                 phase: pod.status.phase,
                 port: resolvedTargetPort,
-                dialIP: svc.spec.clusterIP,
+                // Headless services (clusterIP: None) have no VIP — connect directly to the pod IP.
+                dialIP: svc.spec.clusterIP === "None" ? epAddress.ip : svc.spec.clusterIP,
                 resolvedIP: epAddress.ip,
                 viaService: svcName,
             },
