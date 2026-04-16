@@ -12,14 +12,11 @@ import type { DeploymentStrategy } from "../types/apps/v1/Deployment";
  * restart` produces a new ReplicaSet (matching real Kubernetes behaviour).
  */
 function podTemplateHash(template: import("../types/v1/Pod").PodTemplateSpec): string {
-    const containers = template.spec.containers;
-    const restartedAt = template.metadata?.annotations?.["kubectl.kubernetes.io/restartedAt"] ?? "";
-    const str = containers.map(c => {
-        const ports = (c.ports ?? []).map(p => `${p.containerPort}/${p.protocol ?? "TCP"}`).join(";");
-        const env = (c.env ?? []).map(e => `${e.name}=${e.value ?? ""}`).join(";");
-        const res = JSON.stringify(c.resources ?? {});
-        return `${c.name}=${c.image}|${ports}|${env}|${res}`;
-    }).join(",") + `|restart=${restartedAt}`;
+    const sortedReplacer = (_key: string, value: unknown) =>
+        value !== null && typeof value === "object" && !Array.isArray(value)
+            ? Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)))
+            : value;
+    const str = JSON.stringify(template, sortedReplacer);
     let hash = 5381;
     for (let i = 0; i < str.length; i++) {
         hash = ((hash << 5) + hash) ^ str.charCodeAt(i);
