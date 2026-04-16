@@ -16,6 +16,7 @@ import { useJobController } from '../controllers/useJobController';
 import { useCronJobController } from '../controllers/useCronJobController';
 import { useDaemonSetController } from '../controllers/useDaemonSetController'
 import { useStatefulSetController } from '../controllers/useStatefulSetController';
+import { useServiceController } from '../controllers/useServiceController';
 const now = new Date().toISOString();
 function makeNode(name: string, internalIP: string, podCIDR: string) {
   return {
@@ -68,6 +69,7 @@ function App() {
   useCronJobController(store, dispatch);
   useDaemonSetController(store, dispatch);
   useStatefulSetController(store, dispatch);
+  useServiceController(store, dispatch);
 
   const storeRef = useRef(store);
   // eslint-disable-next-line react-hooks/refs

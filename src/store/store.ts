@@ -622,6 +622,47 @@ function admitPodTemplateSpec(template: PodTemplateSpec): PodTemplateSpec {
     };
 }
 
+/** Returns a set of nodePorts already in use across the given services. */
+function usedNodePortSet(services: Service[]): Set<number> {
+    return new Set(services.flatMap(s => s.spec.ports.map(p => p.nodePort).filter(Boolean) as number[]));
+}
+
+/** Picks a free NodePort from 30000–32767, recording the allocation in `usedNodePorts`. */
+function allocateNodePort(usedNodePorts: Set<number>, hint?: number): number {
+    if (hint !== undefined && hint >= 30000 && hint <= 32767 && !usedNodePorts.has(hint)) {
+        usedNodePorts.add(hint);
+        return hint;
+    }
+    for (let p = 30000; p <= 32767; p++) {
+        if (!usedNodePorts.has(p)) { usedNodePorts.add(p); return p; }
+    }
+    throw new Error("No free NodePort available in range 30000-32767");
+}
+
+/**
+ * Re-applies API-server admission defaults after a merge-patch on a Service:
+ * – clusterIP is immutable: the original value is always restored.
+ * – ports of NodePort/LoadBalancer type receive a nodePort if one is missing.
+ */
+function admitServicePatch(original: Service, patched: Service, otherServices: Service[]): Service {
+    const usedNodePorts = usedNodePortSet(otherServices);
+    for (const p of patched.spec.ports) {
+        if (p.nodePort) usedNodePorts.add(p.nodePort);
+    }
+    const needsNodePort = patched.spec.type === "NodePort" || patched.spec.type === "LoadBalancer";
+    return {
+        ...patched,
+        spec: {
+            ...patched.spec,
+            clusterIP: original.spec.clusterIP,
+            ports: patched.spec.ports.map(p => ({
+                ...p,
+                ...(needsNodePort && !p.nodePort ? { nodePort: allocateNodePort(usedNodePorts) } : {}),
+            })),
+        },
+    };
+}
+
 export const reducer = (state: AppState, action: Action): AppState => {
     if (action.type === CreateReplicaSetType) {
         const { name, namespace, ownerRef, replicas, selector, template } = action.payload;
@@ -874,34 +915,8 @@ export const reducer = (state: AppState, action: Action): AppState => {
     if (action.type === CreateServiceType) {
         const { name, namespace, selector, ports, clusterIP, serviceType } = action.payload;
 
-        // Auto-assign nodePorts for NodePort / LoadBalancer services.
-        // Track ports already occupied across all existing services.
-        const usedNodePorts = new Set(
-            state.Services.flatMap(s => s.spec.ports.map(p => p.nodePort).filter(Boolean) as number[])
-        );
-        const pickNodePort = (hint?: number): number => {
-            if (hint && hint >= 30000 && hint <= 32767 && !usedNodePorts.has(hint)) {
-                usedNodePorts.add(hint);
-                return hint;
-            }
-            for (let p = 30000; p <= 32767; p++) {
-                if (!usedNodePorts.has(p)) { usedNodePorts.add(p); return p; }
-            }
-            throw new Error("No free NodePort available in range 30000-32767");
-        };
+        const usedNodePorts = usedNodePortSet(state.Services);
         const needsNodePort = serviceType === "NodePort" || serviceType === "LoadBalancer";
-
-        // Auto-assign a 203.0.113.x LoadBalancer ingress IP (RFC 5737 TEST-NET-3).
-        const usedLbIps = new Set(
-            state.Services.flatMap(s => s.status.loadBalancer?.ingress?.map(i => i.ip).filter(Boolean) as string[] ?? [])
-        );
-        const pickLbIP = (): string => {
-            for (let octet = 1; octet <= 254; octet++) {
-                const ip = `203.0.113.${octet}`;
-                if (!usedLbIps.has(ip)) return ip;
-            }
-            return "203.0.113.255";
-        };
 
         const svc: Service = {
             metadata: {
@@ -921,12 +936,10 @@ export const reducer = (state: AppState, action: Action): AppState => {
                     port: p.port,
                     targetPort: p.targetPort,
                     protocol: p.protocol ?? "TCP",
-                    ...(needsNodePort ? { nodePort: pickNodePort() } : {}),
+                    ...(needsNodePort ? { nodePort: allocateNodePort(usedNodePorts) } : {}),
                 })),
             },
-            status: serviceType === "LoadBalancer" && clusterIP !== "None"
-                ? { loadBalancer: { ingress: [{ ip: pickLbIP() }] } }
-                : {},
+            status: {},
         };
         const initialEndpoints: Endpoints = {
             metadata: { name, namespace },
@@ -1214,7 +1227,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
             case "daemonset":  return { ...state, DaemonSets:  state.DaemonSets.map(r => match(r) ? apply(r) : r) };
             case "statefulset":return { ...state, StatefulSets: state.StatefulSets.map(r => match(r) ? apply(r) : r) };
             case "pod":        return { ...state, Pods:         state.Pods.map(r => match(r) ? apply(r) : r) };
-            case "service":    return { ...state, Services:     state.Services.map(r => match(r) ? apply(r) : r) };
+            case "service":    return { ...state, Services:     state.Services.map(r => match(r) ? admitServicePatch(r, apply(r), state.Services.filter(s => s !== r)) : r) };
             case "node":       return { ...state, Nodes:        state.Nodes.map(r => match(r) ? apply(r) : r) };
             case "job":        return { ...state, Jobs:         state.Jobs.map(r => match(r) ? apply(r) : r) };
             case "cronjob":    return { ...state, CronJobs:     state.CronJobs.map(r => match(r) ? apply(r) : r) };
