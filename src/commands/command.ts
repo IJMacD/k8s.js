@@ -39,6 +39,7 @@ export async function* command(
     inputLine: string,
     dispatch: ActionDispatch<[action: Action]>,
     getState: () => AppState,
+    openEditor: (yaml: string, namespace: string) => void = () => {},
 ): AsyncGenerator<string> {
     const tokens = tokenize(inputLine.trim());
     // Lowercase only the command verb, not flag values (preserves cron schedules, images, etc.)
@@ -64,7 +65,7 @@ export async function* command(
     } else if (command === "nslookup") {
         yield nslookup(args, getState());
     } else if (command === "kubectl") {
-        yield* kubectl(args, dispatch, getState);
+        yield* kubectl(args, dispatch, getState, openEditor);
     } else {
         yield `Unknown command: ${command}`;
     }

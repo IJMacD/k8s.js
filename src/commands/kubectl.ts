@@ -7,6 +7,7 @@ import { kubectlApply } from "./kubectl-apply";
 import { kubectlCreate } from "./kubectl-create";
 import { kubectlDelete } from "./kubectl-delete";
 import { kubectlDescribe } from "./kubectl-describe";
+import { kubectlEdit } from "./kubectl-edit";
 import { kubectlExpose } from "./kubectl-expose";
 import { kubectlGet } from "./kubectl-get";
 import { kubectlNode } from "./kubectl-node";
@@ -41,6 +42,7 @@ export async function* kubectl(
     rawArgs: string[],
     dispatch: ActionDispatch<[action: Action]>,
     getState: () => AppState,
+    openEditor: (yaml: string, namespace: string) => void = () => {},
 ): AsyncGenerator<string> {
     const state = getState();
     const { namespace, args } = parseKubectlArgs(rawArgs);
@@ -96,6 +98,10 @@ export async function* kubectl(
 
     if (args[0] === "delete") {
         yield* kubectlDelete(args, namespace, state, dispatch);
+        return;
+    }
+    if (args[0] === "edit") {
+        yield* kubectlEdit(args, namespace, state, openEditor);
         return;
     }
     throw Error(`kubectl: Unknown subcommand ${args[0]}`);

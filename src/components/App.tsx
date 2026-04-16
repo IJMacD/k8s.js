@@ -1,8 +1,9 @@
-import { useReducer, useRef, useState } from 'react';
+import { useCallback, useReducer, useRef, useState } from 'react';
 import './App.css'
 import { Console } from './Console'
 import type { ConsoleHandle } from './Console'
 import { Browser } from './Browser'
+import { Editor } from './Editor'
 import { reducer, type Action, type AppState } from '../store/store';
 import { command } from '../commands/command';
 import { stageUpload } from '../commands/kubectl-apply';
@@ -58,7 +59,8 @@ const initialState: AppState = {
 
 function App() {
   const [store, dispatch] = useReducer<AppState, [action: Action]>(reducer, initialState)
-  const [bottomTab, setBottomTab] = useState<'terminal' | 'browser' | null>('terminal');
+  const [bottomTab, setBottomTab] = useState<'terminal' | 'browser' | 'editor' | null>('terminal');
+  const [editorSession, setEditorSession] = useState<{ id: string; yaml: string; namespace: string } | null>(null);
 
   useDeploymentController(store, dispatch);
   useReplicaSetController(store, dispatch);
@@ -90,8 +92,18 @@ function App() {
     });
   }
 
+  const openEditor = useCallback((yaml: string, ns: string) => {
+    setEditorSession({ id: crypto.randomUUID(), yaml, namespace: ns });
+    setBottomTab('editor');
+  }, []);
+
+  function handleEditorClose() {
+    setEditorSession(null);
+    setBottomTab(prev => prev === 'editor' ? 'terminal' : prev);
+  }
+
   function handleCommand(inputLine: string): AsyncGenerator<string> {
-    return command(inputLine, dispatch, () => storeRef.current);
+    return command(inputLine, dispatch, () => storeRef.current, openEditor);
   }
 
   return (
@@ -131,7 +143,7 @@ function App() {
       <div style={{ display: bottomTab !== null ? 'flex' : 'none', flexDirection: 'column', flexShrink: 0 }}>
         {/* Tab strip */}
         <div style={{ display: 'flex', alignItems: 'stretch', backgroundColor: '#252526', borderTop: '1px solid #333', flexShrink: 0 }}>
-          {(['terminal', 'browser'] as const).map(tab => (
+          {(['terminal', 'browser', ...(editorSession ? ['editor' as const] : [])] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setBottomTab(tab)}
@@ -147,7 +159,7 @@ function App() {
                 padding: '5px 16px',
               }}
             >
-              {tab === 'terminal' ? '⌃ TERMINAL' : '🌐 BROWSER'}
+              {tab === 'terminal' ? '⌃ TERMINAL' : tab === 'browser' ? '🌐 BROWSER' : '✎ EDITOR'}
             </button>
           ))}
           <div style={{ flex: 1 }} />
@@ -164,6 +176,18 @@ function App() {
         <div style={{ display: bottomTab === 'browser' ? undefined : 'none' }}>
           <Browser state={store} />
         </div>
+        {editorSession && (
+          <div style={{ display: bottomTab === 'editor' ? undefined : 'none' }}>
+            <Editor
+              key={editorSession.id}
+              state={store}
+              dispatch={dispatch}
+              initialContent={editorSession.yaml}
+              namespace={editorSession.namespace}
+              onClose={handleEditorClose}
+            />
+          </div>
+        )}
       </div>
       {/* Minimised bar */}
       {bottomTab === null && (
@@ -180,6 +204,14 @@ function App() {
           >
             🌐 BROWSER
           </button>
+          {editorSession && (
+            <button
+              onClick={() => setBottomTab('editor')}
+              style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontFamily: 'monospace', fontSize: '11px', padding: '0 8px' }}
+            >
+              ✎ EDITOR
+            </button>
+          )}
         </div>
       )}
     </>
