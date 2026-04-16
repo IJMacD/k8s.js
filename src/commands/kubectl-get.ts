@@ -16,11 +16,31 @@ export async function* kubectlGet(
         yield* kubectlGetYaml(args, namespace, allNamespaces, state);
         return;
     }
+    if (outputFmt === "json") {
+        yield* kubectlGetYaml(args, namespace, allNamespaces, state, "json");
+        return;
+    }
     if (outputFmt !== undefined && outputFmt !== "wide") {
-        throw Error(`kubectl get: output format "${outputFmt}" is not supported (use yaml or wide)`);
+        throw Error(`kubectl get: output format "${outputFmt}" is not supported (use yaml, json, or wide)`);
     }
 
     const allNs = allNamespaces;
+
+    // Parse -l / --selector label selector
+    const selectorFlagIdx = args.findIndex(a => a === "-l" || a === "--selector");
+    const selectorStr = selectorFlagIdx >= 0
+        ? args[selectorFlagIdx + 1]
+        : args.find(a => a.startsWith("-l=") || a.startsWith("--selector="))?.split("=").slice(1).join("=");
+
+    const labelSelector: Record<string, string> = {};
+    if (selectorStr) {
+        for (const part of selectorStr.split(",")) {
+            const m = part.match(/^([^!=]+)==?(.+)$/);
+            if (m) labelSelector[m[1].trim()] = m[2].trim();
+        }
+    }
+    const matchSelector = (labels: Record<string, string> | undefined): boolean =>
+        Object.entries(labelSelector).every(([k, v]) => labels?.[k] === v);
 
     // Elapsed-time formatter: from ISO timestamp (to optional end timestamp)
     const elapsed = (from: string, to?: string): string => {
@@ -59,7 +79,8 @@ export async function* kubectlGet(
             : { type: entry.toLowerCase(), name: undefined as string | undefined };
     });
     // For a single resource without slash, "kubectl get pods <name>" uses args[2] as the name
-    if (entries.length === 1 && entries[0].name === undefined && args[2]) {
+    // but only when it isn't a flag (e.g. -l)
+    if (entries.length === 1 && entries[0].name === undefined && args[2] && !args[2].startsWith("-")) {
         entries[0].name = args[2];
     }
 
@@ -68,7 +89,7 @@ export async function* kubectlGet(
     const renderGet = (type: string, name: string | undefined): string => {
         if (type === "pods" || type === "pod" || type === "po") {
             const items = state.Pods.filter(
-                p => inNs(p.metadata.namespace) && (name === undefined || p.metadata.name === name),
+                p => inNs(p.metadata.namespace) && (name === undefined || p.metadata.name === name) && matchSelector(p.metadata.labels),
             );
             if (name && items.length === 0)
                 throw Error(`Error from server (NotFound): pods "${name}" not found`);
@@ -90,7 +111,7 @@ export async function* kubectlGet(
         }
         if (type === "deployments" || type === "deployment" || type === "deploy") {
             const items = state.Deployments.filter(
-                d => inNs(d.metadata.namespace) && (name === undefined || d.metadata.name === name),
+                d => inNs(d.metadata.namespace) && (name === undefined || d.metadata.name === name) && matchSelector(d.metadata.labels),
             );
             if (name && items.length === 0)
                 throw Error(`Error from server (NotFound): deployments "${name}" not found`);
@@ -107,7 +128,7 @@ export async function* kubectlGet(
         }
         if (type === "replicasets" || type === "replicaset" || type === "rs") {
             const items = state.ReplicaSets.filter(
-                rs => inNs(rs.metadata.namespace) && (name === undefined || rs.metadata.name === name),
+                rs => inNs(rs.metadata.namespace) && (name === undefined || rs.metadata.name === name) && matchSelector(rs.metadata.labels),
             );
             if (name && items.length === 0)
                 throw Error(`Error from server (NotFound): replicasets "${name}" not found`);
@@ -124,7 +145,7 @@ export async function* kubectlGet(
         }
         if (type === "daemonsets" || type === "daemonset" || type === "ds") {
             const items = state.DaemonSets.filter(
-                ds => inNs(ds.metadata.namespace) && (name === undefined || ds.metadata.name === name),
+                ds => inNs(ds.metadata.namespace) && (name === undefined || ds.metadata.name === name) && matchSelector(ds.metadata.labels),
             );
             if (name && items.length === 0)
                 throw Error(`Error from server (NotFound): daemonsets "${name}" not found`);
@@ -147,7 +168,7 @@ export async function* kubectlGet(
         }
         if (type === "statefulsets" || type === "statefulset" || type === "sts") {
             const items = state.StatefulSets.filter(
-                sts => inNs(sts.metadata.namespace) && (name === undefined || sts.metadata.name === name),
+                sts => inNs(sts.metadata.namespace) && (name === undefined || sts.metadata.name === name) && matchSelector(sts.metadata.labels),
             );
             if (name && items.length === 0)
                 throw Error(`Error from server (NotFound): statefulsets "${name}" not found`);
@@ -162,7 +183,7 @@ export async function* kubectlGet(
         }
         if (type === "services" || type === "service" || type === "svc") {
             const items = state.Services.filter(
-                s => inNs(s.metadata.namespace) && (name === undefined || s.metadata.name === name),
+                s => inNs(s.metadata.namespace) && (name === undefined || s.metadata.name === name) && matchSelector(s.metadata.labels),
             );
             if (name && items.length === 0)
                 throw Error(`Error from server (NotFound): services "${name}" not found`);
@@ -199,7 +220,7 @@ export async function* kubectlGet(
             return fmtTable(headers, rows);
         }
         if (type === "nodes" || type === "node") {
-            const items = state.Nodes.filter(n => name === undefined || n.metadata.name === name);
+            const items = state.Nodes.filter(n => (name === undefined || n.metadata.name === name) && matchSelector(n.metadata.labels));
             if (name && items.length === 0)
                 throw Error(`Error from server (NotFound): nodes "${name}" not found`);
             const headers = ["NAME", "STATUS", "ROLES", "AGE", "VERSION"];

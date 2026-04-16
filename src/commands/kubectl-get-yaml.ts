@@ -67,12 +67,9 @@ function collect(
     }
 }
 
-/** Serialise a list of items into a YAML v1/List document */
-function makeList(items: object[], dump: (obj: unknown, opts?: object) => string): string {
-    return dump(
-        { apiVersion: "v1", kind: "List", metadata: { resourceVersion: "" }, items },
-        { lineWidth: -1, noRefs: true },
-    ).trimEnd();
+/** Serialise a list of items into a v1/List document (YAML or JSON) */
+function makeList(items: object[], serialize: (obj: unknown) => string): string {
+    return serialize({ apiVersion: "v1", kind: "List", metadata: { resourceVersion: "" }, items }).trimEnd();
 }
 
 export async function* kubectlGetYaml(
@@ -80,8 +77,15 @@ export async function* kubectlGetYaml(
     namespace: string,
     allNamespaces: boolean,
     state: AppState,
+    format: "yaml" | "json" = "yaml",
 ): AsyncGenerator<string> {
-    const { dump } = await import("js-yaml");
+    let serialize: (obj: unknown) => string;
+    if (format === "json") {
+        serialize = (obj) => JSON.stringify(obj, null, 2);
+    } else {
+        const { dump } = await import("js-yaml");
+        serialize = (obj) => dump(obj as Record<string, unknown>, { lineWidth: -1, noRefs: true }).trimEnd();
+    }
     // Strip -o / --output flags so they don't interfere with positional arg parsing.
     // args[0]="get"  args[1]=resource-type  args[2]=optional-name
     const cleanArgs: string[] = [];
@@ -105,13 +109,13 @@ export async function* kubectlGetYaml(
         entries[0].name = cleanArgs[2];
     }
 
-    // "kubectl get all -o yaml"
+    // "kubectl get all -o yaml/json"
     if (entries.length === 1 && entries[0].type === "all") {
         const allKinds = ["pod", "service", "endpoints", "daemonset", "statefulset", "replicaset", "deployment", "job", "cronjob"];
         const items = allKinds.flatMap(
             kind => collect(kind, undefined, namespace, allNamespaces, state).map(obj => annotate(kind, obj)),
         );
-        yield makeList(items, dump);
+        yield makeList(items, serialize);
         return;
     }
 
@@ -133,10 +137,10 @@ export async function* kubectlGetYaml(
         allItems.push(...items.map(obj => annotate(kind, obj)));
     }
 
-    // Single named resource → bare YAML object; anything else → List
+    // Single named resource → bare object; anything else → List
     if (entries.length === 1 && entries[0].name !== undefined) {
-        yield dump(allItems[0], { lineWidth: -1, noRefs: true }).trimEnd();
+        yield serialize(allItems[0]);
     } else {
-        yield makeList(allItems, dump);
+        yield makeList(allItems, serialize);
     }
 }

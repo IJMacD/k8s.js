@@ -53,6 +53,7 @@ const DeleteStatefulSetType = "DELETE_STATEFULSET";
 const UpdateStatefulSetStatusType = "UPDATE_STATEFULSET_STATUS";
 const ScaleStatefulSetType = "SCALE_STATEFULSET";
 const PatchResourceType = "PATCH_RESOURCE";
+const RollbackDeploymentType = "ROLLBACK_DEPLOYMENT";
 
 export type ActionType =
     | typeof CreateDeploymentType
@@ -86,7 +87,8 @@ export type ActionType =
     | typeof DeleteStatefulSetType
     | typeof UpdateStatefulSetStatusType
     | typeof ScaleStatefulSetType
-    | typeof PatchResourceType;
+    | typeof PatchResourceType
+    | typeof RollbackDeploymentType;
 
 export interface CreateDeploymentAction {
     type: typeof CreateDeploymentType;
@@ -298,7 +300,8 @@ export type Action =
     | UpdateStatefulSetStatusAction
     | { type: typeof ScaleStatefulSetType; payload: { name: string; namespace: string; replicas: number } }
     | { type: typeof DeleteStatefulSetType; payload: { name: string; namespace: string } }
-    | { type: typeof PatchResourceType; payload: { kind: string; name: string; namespace: string; patch: Record<string, unknown> } };
+    | { type: typeof PatchResourceType; payload: { kind: string; name: string; namespace: string; patch: Record<string, unknown> } }
+    | { type: typeof RollbackDeploymentType; payload: { name: string; namespace: string; template: import("../types/v1/Pod").PodTemplateSpec } };
 
 export function deleteDeployment(name: string, namespace = "default") {
     return { type: DeleteDeploymentType as typeof DeleteDeploymentType, payload: { name, namespace } };
@@ -356,6 +359,14 @@ export function patchResource(
     namespace = "default",
 ) {
     return { type: PatchResourceType as typeof PatchResourceType, payload: { kind, name, namespace, patch } };
+}
+
+export function rollbackDeployment(
+    name: string,
+    template: import("../types/v1/Pod").PodTemplateSpec,
+    namespace = "default",
+) {
+    return { type: RollbackDeploymentType as typeof RollbackDeploymentType, payload: { name, namespace, template } };
 }
 
 export function scaleStatefulSet(name: string, replicas: number, namespace = "default") {
@@ -1099,6 +1110,17 @@ export const reducer = (state: AppState, action: Action): AppState => {
             ...state,
             StatefulSets: state.StatefulSets.filter(
                 sts => !(sts.metadata.name === name && sts.metadata.namespace === namespace),
+            ),
+        };
+    }
+    if (action.type === RollbackDeploymentType) {
+        const { name, namespace, template } = action.payload;
+        return {
+            ...state,
+            Deployments: state.Deployments.map(d =>
+                d.metadata.name === name && d.metadata.namespace === namespace
+                    ? { ...d, metadata: { ...d.metadata, generation: d.metadata.generation + 1 }, spec: { ...d.spec, template } }
+                    : d
             ),
         };
     }

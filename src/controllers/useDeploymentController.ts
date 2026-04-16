@@ -5,18 +5,21 @@ import { createReplicaSet, deleteReplicaSet, scaleReplicaSet, updateDeploymentSt
 import type { DeploymentStrategy } from "../types/apps/v1/Deployment";
 
 /**
- * Computes a stable 7-char hex hash of a pod template's containers,
- * used to generate ReplicaSet names (mirrors kubectl's pod-template-hash label).
- * Includes image, env vars, and resource requirements so that changes to any of
- * these fields produce a new ReplicaSet (matching real Kubernetes rollout behaviour).
+ * Computes a stable 7-char hex hash of a pod template's containers and
+ * restart annotation, used to generate ReplicaSet names (mirrors kubectl's
+ * pod-template-hash label). Includes image, env vars, resource requirements,
+ * and the `kubectl.kubernetes.io/restartedAt` annotation so that `rollout
+ * restart` produces a new ReplicaSet (matching real Kubernetes behaviour).
  */
-function podTemplateHash(containers: import("../types/v1/Pod").Container[]): string {
+function podTemplateHash(template: import("../types/v1/Pod").PodTemplateSpec): string {
+    const containers = template.spec.containers;
+    const restartedAt = template.metadata?.annotations?.["kubectl.kubernetes.io/restartedAt"] ?? "";
     const str = containers.map(c => {
         const ports = (c.ports ?? []).map(p => `${p.containerPort}/${p.protocol ?? "TCP"}`).join(";");
         const env = (c.env ?? []).map(e => `${e.name}=${e.value ?? ""}`).join(";");
         const res = JSON.stringify(c.resources ?? {});
         return `${c.name}=${c.image}|${ports}|${env}|${res}`;
-    }).join(",");
+    }).join(",") + `|restart=${restartedAt}`;
     let hash = 5381;
     for (let i = 0; i < str.length; i++) {
         hash = ((hash << 5) + hash) ^ str.charCodeAt(i);
@@ -83,8 +86,7 @@ export function useDeploymentController(
         for (const deployment of Deployments) {
             const { name, namespace } = deployment.metadata;
             const desired = deployment.spec.replicas;
-            const containers = deployment.spec.template.spec.containers;
-            const hash = podTemplateHash(containers);
+            const hash = podTemplateHash(deployment.spec.template);
             const expectedRsName = `${name}-${hash}`;
 
             const ownedRSes = ReplicaSets.filter(

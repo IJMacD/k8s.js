@@ -14,6 +14,7 @@ import { kubectlPatch } from "./kubectl-patch";
 import { kubectlRollout } from "./kubectl-rollout";
 import { kubectlScale } from "./kubectl-scale";
 import { kubectlLabel } from "./kubectl-label";
+import { kubectlAnnotate } from "./kubectl-annotate";
 import { kubectlSet } from "./kubectl-set";
 
 /**
@@ -67,6 +68,10 @@ export async function* kubectl(
         yield* kubectlLabel(args, namespace, state, dispatch);
         return;
     }
+    if (args[0] === "annotate") {
+        yield* kubectlAnnotate(args, namespace, state, dispatch);
+        return;
+    }
     if (args[0] === "cordon" || args[0] === "uncordon" || args[0] === "drain") {
         yield* kubectlNode(args, state, dispatch);
         return;
@@ -77,7 +82,7 @@ export async function* kubectl(
         return;
     }
     if (args[0] === "rollout") {
-        yield* kubectlRollout(args, namespace, state, getState);
+        yield* kubectlRollout(args, namespace, state, getState, dispatch);
         return;
     }
     if (args[0] === "describe") {
