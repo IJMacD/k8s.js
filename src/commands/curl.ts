@@ -230,15 +230,20 @@ function resolve(host: string, portHint: number, state: AppState): ResolveResult
     }
 
     // --- 5. NodePort: <node-ip>:<nodePort> or <node-name>:<nodePort> ---
-    const isNode = state.Nodes.some(
+    const node = state.Nodes.find(
         n => n.metadata.name === host || n.status.addresses.some(a => a.address === host),
     );
-    if (isNode) {
+    if (node) {
+        const nodeIP =
+            node.status.addresses.find(a => a.type === "InternalIP")?.address ?? host;
         for (const svc of state.Services) {
             if (svc.spec.type !== "NodePort" && svc.spec.type !== "LoadBalancer") continue;
             const svcPort = svc.spec.ports.find(p => p.nodePort === portHint);
             if (svcPort) {
-                return resolveViaService(svc.metadata.name, svc.metadata.namespace, svcPort.port, state);
+                const r = resolveViaService(svc.metadata.name, svc.metadata.namespace, svcPort.port, state);
+                // NodePort — the client connects to the node IP, not the service ClusterIP
+                if (r.ok) r.target.dialIP = nodeIP;
+                return r;
             }
         }
         // Node exists but no service is exposed on this nodePort
