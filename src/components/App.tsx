@@ -1,10 +1,10 @@
-import { useCallback, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import './App.css'
 import { Console } from './Console'
 import type { ConsoleHandle } from './Console'
 import { Browser } from './Browser'
 import { Editor } from './Editor'
-import { reducer, type Action, type AppState } from '../store/store';
+import { reducer, resetState, type AppState } from '../store/store';
 import { shell } from '../commands/command';
 import { writeFile } from '../commands/filesystem';
 import { ResourceTabs } from './ResourceTabs';
@@ -18,49 +18,59 @@ import { useCronJobController } from '../controllers/useCronJobController';
 import { useDaemonSetController } from '../controllers/useDaemonSetController'
 import { useStatefulSetController } from '../controllers/useStatefulSetController';
 import { useServiceController } from '../controllers/useServiceController';
-const now = new Date().toISOString();
-function makeNode(name: string, internalIP: string, podCIDR: string) {
+const STORAGE_KEY = 'k8s-apiserver';
+
+function makeInitialState(): AppState {
+  const now = new Date().toISOString();
+  function makeNode(name: string, internalIP: string, podCIDR: string) {
+    return {
+      metadata: { uid: crypto.randomUUID(), name, labels: { 'kubernetes.io/hostname': name }, annotations: {}, creationTimestamp: now },
+      spec: { unschedulable: false, podCIDR },
+      status: {
+        conditions: [
+          { type: 'Ready' as const,          status: 'True'  as const, lastTransitionTime: now, reason: 'KubeletReady', message: 'kubelet is posting ready status' },
+          { type: 'MemoryPressure' as const, status: 'False' as const, lastTransitionTime: now },
+          { type: 'DiskPressure'   as const, status: 'False' as const, lastTransitionTime: now },
+          { type: 'PIDPressure'    as const, status: 'False' as const, lastTransitionTime: now },
+        ],
+        capacity:    { cpu: '4', memory: '8Gi', pods: '110' },
+        allocatable: { cpu: '4', memory: '8Gi', pods: '110' },
+        addresses: [
+          { type: 'InternalIP' as const, address: internalIP },
+          { type: 'Hostname'   as const, address: name },
+        ],
+      },
+    };
+  }
   return {
-    metadata: { uid: crypto.randomUUID(), name, labels: { 'kubernetes.io/hostname': name }, annotations: {}, creationTimestamp: now },
-    spec: { unschedulable: false, podCIDR },
-    status: {
-      conditions: [
-        { type: 'Ready' as const,          status: 'True'  as const, lastTransitionTime: now, reason: 'KubeletReady', message: 'kubelet is posting ready status' },
-        { type: 'MemoryPressure' as const, status: 'False' as const, lastTransitionTime: now },
-        { type: 'DiskPressure'   as const, status: 'False' as const, lastTransitionTime: now },
-        { type: 'PIDPressure'    as const, status: 'False' as const, lastTransitionTime: now },
-      ],
-      capacity:    { cpu: '4', memory: '8Gi', pods: '110' },
-      allocatable: { cpu: '4', memory: '8Gi', pods: '110' },
-      addresses: [
-        { type: 'InternalIP' as const, address: internalIP },
-        { type: 'Hostname'   as const, address: name },
-      ],
-    },
+    Deployments: [],
+    ReplicaSets: [],
+    DaemonSets: [],
+    StatefulSets: [],
+    Pods: [],
+    Services: [],
+    Endpoints: [],
+    Nodes: [
+      makeNode('node-1', '192.168.0.1', '10.244.0.0/24'),
+      makeNode('node-2', '192.168.0.2', '10.244.1.0/24'),
+      makeNode('node-3', '192.168.0.3', '10.244.2.0/24'),
+    ],
+    Jobs: [],
+    CronJobs: [],
   };
 }
 
-const initialState: AppState = {
-  Deployments: [],
-  ReplicaSets: [],
-  DaemonSets: [],
-  StatefulSets: [],
-  Pods: [],
-  Services: [],
-  Endpoints: [],
-  Nodes: [
-    makeNode('node-1', '192.168.0.1', '10.244.0.0/24'),
-    makeNode('node-2', '192.168.0.2', '10.244.1.0/24'),
-    makeNode('node-3', '192.168.0.3', '10.244.2.0/24'),
-  ],
-  Jobs: [],
-  CronJobs: [],
-}
-
 function App() {
-  const [store, dispatch] = useReducer<AppState, [action: Action]>(reducer, initialState)
+  const [store, dispatch] = useReducer(reducer, STORAGE_KEY, (key): AppState => {
+    try {
+      const stored = localStorage.getItem(key);
+      if (stored !== null) return JSON.parse(stored) as AppState;
+    } catch { /* ignore — fall back to fresh state */ }
+    return makeInitialState();
+  });
   const [bottomTab, setBottomTab] = useState<'terminal' | 'browser' | 'editor' | null>('terminal');
   const [editorSession, setEditorSession] = useState<{ id: string; yaml: string; namespace: string } | null>(null);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   useDeploymentController(store, dispatch);
   useReplicaSetController(store, dispatch);
@@ -72,6 +82,12 @@ function App() {
   useDaemonSetController(store, dispatch);
   useStatefulSetController(store, dispatch);
   useServiceController(store, dispatch);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+    } catch { /* ignore — storage quota exceeded */ }
+  }, [store]);
 
   const storeRef = useRef(store);
   // eslint-disable-next-line react-hooks/refs
@@ -124,6 +140,13 @@ function App() {
             style={{ background: '#3a3a3a', border: '1px solid #555', borderRadius: '4px', color: '#d4d4d4', cursor: 'pointer', fontFamily: 'monospace', fontSize: '12px', padding: '4px 12px' }}
           >
             Apply YAML
+          </button>
+          <button
+            onClick={() => setShowResetConfirm(true)}
+            title="Reset the cluster to its initial state"
+            style={{ background: '#3a3a3a', border: '1px solid #555', borderRadius: '4px', color: '#d4d4d4', cursor: 'pointer', fontFamily: 'monospace', fontSize: '12px', padding: '4px 12px' }}
+          >
+            Reset cluster
           </button>
         </div>
         <ResourceTabs
@@ -212,6 +235,28 @@ function App() {
               ✎ EDITOR
             </button>
           )}
+        </div>
+      )}
+      {showResetConfirm && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <div style={{ background: '#252526', border: '1px solid #555', borderRadius: '6px', padding: '24px 28px', maxWidth: '380px', width: '100%' }}>
+            <p style={{ color: '#e0e0e0', margin: '0 0 8px', fontWeight: 600 }}>Reset cluster?</p>
+            <p style={{ color: '#aaa', margin: '0 0 20px', fontSize: '13px' }}>This will remove all workloads and restore the three default nodes. This cannot be undone.</p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button
+                onClick={() => setShowResetConfirm(false)}
+                style={{ background: '#3a3a3a', border: '1px solid #555', borderRadius: '4px', color: '#d4d4d4', cursor: 'pointer', fontFamily: 'monospace', fontSize: '12px', padding: '6px 16px' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { dispatch(resetState(makeInitialState())); setShowResetConfirm(false); }}
+                style={{ background: '#7f1d1d', border: '1px solid #ef4444', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontFamily: 'monospace', fontSize: '12px', padding: '6px 16px' }}
+              >
+                Reset
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </>

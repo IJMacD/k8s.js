@@ -54,6 +54,7 @@ const UpdateStatefulSetStatusType = "UPDATE_STATEFULSET_STATUS";
 const ScaleStatefulSetType = "SCALE_STATEFULSET";
 const PatchResourceType = "PATCH_RESOURCE";
 const RollbackDeploymentType = "ROLLBACK_DEPLOYMENT";
+const ResetStateType = "RESET_STATE";
 
 export type ActionType =
     | typeof CreateDeploymentType
@@ -88,7 +89,8 @@ export type ActionType =
     | typeof UpdateStatefulSetStatusType
     | typeof ScaleStatefulSetType
     | typeof PatchResourceType
-    | typeof RollbackDeploymentType;
+    | typeof RollbackDeploymentType
+    | typeof ResetStateType;
 
 export interface CreateDeploymentAction {
     type: typeof CreateDeploymentType;
@@ -309,7 +311,8 @@ export type Action =
     | { type: typeof ScaleStatefulSetType; payload: { name: string; namespace: string; replicas: number } }
     | { type: typeof DeleteStatefulSetType; payload: { name: string; namespace: string } }
     | { type: typeof PatchResourceType; payload: { kind: string; name: string; namespace: string; patch: Record<string, unknown> } }
-    | { type: typeof RollbackDeploymentType; payload: { name: string; namespace: string; template: import("../types/v1/Pod").PodTemplateSpec } };
+    | { type: typeof RollbackDeploymentType; payload: { name: string; namespace: string; template: import("../types/v1/Pod").PodTemplateSpec } }
+    | { type: typeof ResetStateType; payload: AppState };
 
 export function deleteDeployment(name: string, namespace = "default") {
     return { type: DeleteDeploymentType as typeof DeleteDeploymentType, payload: { name, namespace } };
@@ -375,6 +378,10 @@ export function rollbackDeployment(
     namespace = "default",
 ) {
     return { type: RollbackDeploymentType as typeof RollbackDeploymentType, payload: { name, namespace, template } };
+}
+
+export function resetState(state: AppState) {
+    return { type: ResetStateType as typeof ResetStateType, payload: state };
 }
 
 export function scaleStatefulSet(name: string, replicas: number, namespace = "default") {
@@ -1232,6 +1239,9 @@ export const reducer = (state: AppState, action: Action): AppState => {
             case "job":        return { ...state, Jobs:         state.Jobs.map(r => match(r) ? apply(r) : r) };
             case "cronjob":    return { ...state, CronJobs:     state.CronJobs.map(r => match(r) ? apply(r) : r) };
         }
+    }
+    if (action.type === ResetStateType) {
+        return action.payload;
     }
     return state;
 };
