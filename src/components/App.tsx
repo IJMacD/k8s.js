@@ -5,7 +5,7 @@ import type { ConsoleHandle } from './Console'
 import { Browser } from './Browser'
 import { Editor } from './Editor'
 import { reducer, type Action, type AppState } from '../store/store';
-import { command } from '../commands/command';
+import { shell } from '../commands/command';
 import { writeFile } from '../commands/filesystem';
 import { ResourceTabs } from './ResourceTabs';
 import { useDeploymentController } from '../controllers/useDeploymentController';
@@ -103,7 +103,7 @@ function App() {
   }
 
   function handleCommand(inputLine: string): AsyncGenerator<string> {
-    return command(inputLine, dispatch, () => storeRef.current, openEditor);
+    return shell(inputLine, dispatch, () => storeRef.current, openEditor);
   }
 
   return (

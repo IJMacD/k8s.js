@@ -4,7 +4,27 @@ import { kubectl } from "./kubectl";
 import { ping } from "./ping";
 import { curl } from "./curl";
 import { nslookup } from "./nslookup";
-import { listFiles, readFile } from "./filesystem";
+import { listFiles, readFile, writeFile } from "./filesystem";
+
+/**
+ * Splits a raw input line on the first unquoted `>`, returning the command
+ * portion and an optional redirect target filename.
+ */
+function parseRedirect(input: string): { cmd: string; redirectTo: string | null } {
+    let quote: "'" | '"' | null = null;
+    for (let i = 0; i < input.length; i++) {
+        const ch = input[i];
+        if (quote) {
+            if (ch === quote) quote = null;
+        } else if (ch === "'" || ch === '"') {
+            quote = ch;
+        } else if (ch === ">") {
+            const redirectTo = input.slice(i + 1).trim();
+            return { cmd: input.slice(0, i).trim(), redirectTo: redirectTo || null };
+        }
+    }
+    return { cmd: input, redirectTo: null };
+}
 
 // Splits a command line into tokens, honouring single and double quotes so
 // that values containing spaces (e.g. --schedule='*/1 * * * *') are kept
@@ -36,17 +56,13 @@ function tokenize(input: string): string[] {
     return tokens;
 }
 
-export async function* command(
-    inputLine: string,
+async function* exec(
+    command: string,
+    args: string[],
     dispatch: ActionDispatch<[action: Action]>,
     getState: () => AppState,
-    openEditor: (yaml: string, namespace: string) => void = () => {},
+    openEditor: (yaml: string, namespace: string) => void,
 ): AsyncGenerator<string> {
-    const tokens = tokenize(inputLine.trim());
-    // Lowercase only the command verb, not flag values (preserves cron schedules, images, etc.)
-    const command = (tokens[0] ?? "").toLowerCase();
-    const args = tokens.slice(1);
-
     if (command === "") {
         return;
     } else if (command === "help") {
@@ -86,4 +102,28 @@ export async function* command(
     } else {
         yield `Unknown command: ${command}`;
     }
+}
+
+export async function* shell(
+    inputLine: string,
+    dispatch: ActionDispatch<[action: Action]>,
+    getState: () => AppState,
+    openEditor: (yaml: string, namespace: string) => void = () => { },
+): AsyncGenerator<string> {
+    const { cmd, redirectTo } = parseRedirect(inputLine.trim());
+    const tokens = tokenize(cmd);
+    // Lowercase only the command verb, not flag values (preserves cron schedules, images, etc.)
+    const command = (tokens[0] ?? "").toLowerCase();
+    const args = tokens.slice(1);
+
+    if (redirectTo) {
+        const lines: string[] = [];
+        for await (const line of exec(command, args, dispatch, getState, openEditor)) {
+            lines.push(line);
+        }
+        writeFile(redirectTo, lines.join("\n"));
+        return;
+    }
+
+    yield* exec(command, args, dispatch, getState, openEditor);
 }
