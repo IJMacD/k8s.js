@@ -35,6 +35,34 @@ function podTemplateLines(template: PodTemplate): string[] {
     ];
 }
 
+/**
+ * Compute the Kubernetes QoS class for a pod's container list.
+ *
+ * Guaranteed — every container has both cpu AND memory limits set, and each
+ *              limit equals its corresponding request (absent requests default
+ *              to the limit value, matching Kubernetes admission behaviour).
+ * Burstable  — at least one container has any request or limit set, but the
+ *              Guaranteed criteria are not met.
+ * BestEffort — no container has any requests or limits set.
+ */
+function computeQoSClass(containers: import("../types/v1/Pod").Container[]): string {
+    const hasAny = containers.some(
+        c => c.resources?.requests?.cpu  || c.resources?.requests?.memory ||
+             c.resources?.limits?.cpu    || c.resources?.limits?.memory,
+    );
+    if (!hasAny) return "BestEffort";
+
+    const allGuaranteed = containers.every(c => {
+        const lCpu = c.resources?.limits?.cpu;
+        const lMem = c.resources?.limits?.memory;
+        if (!lCpu || !lMem) return false;
+        const rCpu = c.resources?.requests?.cpu ?? lCpu;
+        const rMem = c.resources?.requests?.memory ?? lMem;
+        return rCpu === lCpu && rMem === lMem;
+    });
+    return allGuaranteed ? "Guaranteed" : "Burstable";
+}
+
 export async function* kubectlDescribe(
     args: string[],
     namespace: string,
@@ -405,7 +433,7 @@ export async function* kubectlDescribe(
                     : [`  <none>`];
             })(),
             ``,
-            `QoS Class:        BestEffort`,
+            `QoS Class:        ${computeQoSClass(pod.spec.containers)}`,
             `Node-Selectors:   <none>`,
             `Tolerations:      node.kubernetes.io/not-ready:NoExecute op=Exists for 300s`,
             ``,
