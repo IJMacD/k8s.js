@@ -5,6 +5,59 @@ import {
     type AppState,
 } from "../store/store";
 
+/**
+ * Paths whose runtime values are free-key maps (Record<string, string>).
+ * Children of these paths are not validated against the live resource.
+ */
+const FREE_KEY_PATHS: ReadonlySet<string> = new Set([
+    "metadata.labels",
+    "metadata.annotations",
+    "spec.selector",                        // Service: Record<string, string>
+    "spec.selector.matchLabels",            // Deployment / DaemonSet / StatefulSet
+    "spec.template.metadata.labels",
+    "spec.template.metadata.annotations",
+    "spec.template.spec.nodeSelector",
+    "spec.nodeSelector",                    // Pod
+]);
+
+/**
+ * Recursively checks that every key in `patch` exists in `target`.
+ * Returns an array of human-readable error strings (empty = valid).
+ * Skips validation for children of known free-key map paths (labels, annotations, etc.).
+ */
+function validatePatchKeys(
+    patch: Record<string, unknown>,
+    target: object,
+    path = "",
+): string[] {
+    const errors: string[] = [];
+    for (const [key, value] of Object.entries(patch)) {
+        const fullPath = path ? `${path}.${key}` : key;
+        if (!(key in target)) {
+            const suggestion = Object.keys(target as Record<string, unknown>)
+                .find(k => k.toLowerCase() === key.toLowerCase());
+            const hint = suggestion
+                ? ` (did you mean "${path ? `${path}.` : ""}${suggestion}"?)`
+                : "";
+            errors.push(`unknown field "${fullPath}"${hint}`);
+            continue;
+        }
+        // Recurse into nested object patches unless this path is a free-key map or the value is null (a delete)
+        if (
+            value !== null &&
+            typeof value === "object" &&
+            !Array.isArray(value) &&
+            !FREE_KEY_PATHS.has(fullPath)
+        ) {
+            const child = (target as Record<string, unknown>)[key];
+            if (typeof child === "object" && child !== null && !Array.isArray(child)) {
+                errors.push(...validatePatchKeys(value as Record<string, unknown>, child as object, fullPath));
+            }
+        }
+    }
+    return errors;
+}
+
 export async function* kubectlPatch(
     args: string[],
     namespace: string,
@@ -64,25 +117,38 @@ export async function* kubectlPatch(
         throw Error("kubectl patch: patch must be a JSON object");
     }
 
-    // Verify resource exists
-    const notFound = () => {
-        const plurals: Record<string, string> = {
-            deployment: "deployments", replicaset: "replicasets", daemonset: "daemonsets",
-            statefulset: "statefulsets", pod: "pods", service: "services",
-            node: "nodes", job: "jobs", cronjob: "cronjobs",
-        };
-        throw Error(`Error from server (NotFound): ${plurals[resolvedKind] ?? resolvedKind} "${resourceName}" not found`);
+    // Look up the live resource (also serves as the existence check)
+    const plurals: Record<string, string> = {
+        deployment: "deployments", replicaset: "replicasets", daemonset: "daemonsets",
+        statefulset: "statefulsets", pod: "pods", service: "services",
+        node: "nodes", job: "jobs", cronjob: "cronjobs",
     };
-    switch (resolvedKind) {
-        case "deployment": if (!state.Deployments.find(r => r.metadata.name === resourceName && r.metadata.namespace === namespace)) notFound(); break;
-        case "replicaset": if (!state.ReplicaSets.find(r => r.metadata.name === resourceName && r.metadata.namespace === namespace)) notFound(); break;
-        case "daemonset": if (!state.DaemonSets.find(r => r.metadata.name === resourceName && r.metadata.namespace === namespace)) notFound(); break;
-        case "statefulset": if (!state.StatefulSets.find(r => r.metadata.name === resourceName && r.metadata.namespace === namespace)) notFound(); break;
-        case "pod": if (!state.Pods.find(r => r.metadata.name === resourceName && r.metadata.namespace === namespace)) notFound(); break;
-        case "service": if (!state.Services.find(r => r.metadata.name === resourceName && r.metadata.namespace === namespace)) notFound(); break;
-        case "node": if (!state.Nodes.find(r => r.metadata.name === resourceName)) notFound(); break;
-        case "job": if (!state.Jobs.find(r => r.metadata.name === resourceName && r.metadata.namespace === namespace)) notFound(); break;
-        case "cronjob": if (!state.CronJobs.find(r => r.metadata.name === resourceName && r.metadata.namespace === namespace)) notFound(); break;
+    const byNameNs = <T extends { metadata: { name: string; namespace?: string } }>(arr: T[]) =>
+        arr.find(r => r.metadata.name === resourceName && r.metadata.namespace === namespace);
+    const byName = <T extends { metadata: { name: string } }>(arr: T[]) =>
+        arr.find(r => r.metadata.name === resourceName);
+
+    const liveResource: object | undefined = (() => {
+        switch (resolvedKind) {
+            case "deployment":  return byNameNs(state.Deployments);
+            case "replicaset":  return byNameNs(state.ReplicaSets);
+            case "daemonset":   return byNameNs(state.DaemonSets);
+            case "statefulset": return byNameNs(state.StatefulSets);
+            case "pod":         return byNameNs(state.Pods);
+            case "service":     return byNameNs(state.Services);
+            case "node":        return byName(state.Nodes);
+            case "job":         return byNameNs(state.Jobs);
+            case "cronjob":     return byNameNs(state.CronJobs);
+        }
+    })();
+
+    if (!liveResource) {
+        throw Error(`Error from server (NotFound): ${plurals[resolvedKind] ?? resolvedKind} "${resourceName}" not found`);
+    }
+
+    const fieldErrors = validatePatchKeys(patch, liveResource);
+    if (fieldErrors.length > 0) {
+        throw Error(fieldErrors.map(e => `error: ${e}`).join("\n"));
     }
 
     dispatch(patchResource(resolvedKind, resourceName, patch, namespace));

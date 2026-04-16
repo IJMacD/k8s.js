@@ -1,5 +1,5 @@
 import type { Deployment } from "../types/apps/v1/Deployment";
-import type { Pod } from "../types/v1/Pod";
+import type { Pod, PodTemplateSpec } from "../types/v1/Pod";
 import type { ReplicaSet } from "../types/apps/v1/ReplicaSet";
 import type { DaemonSet } from "../types/apps/v1/DaemonSet";
 import type { StatefulSet } from "../types/apps/v1/StatefulSet";
@@ -603,6 +603,25 @@ export function createPod(
     };
 }
 
+/**
+ * Mirror Kubernetes admission-time defaulting: fill in optional map fields
+ * (`labels`, `annotations`, `nodeSelector`) with empty objects so that
+ * `kubectl patch --type merge` can target them even before any value is set.
+ */
+function admitPodTemplateSpec(template: PodTemplateSpec): PodTemplateSpec {
+    return {
+        metadata: {
+            ...template.metadata,
+            labels: template.metadata.labels ?? {},
+            annotations: template.metadata.annotations ?? {},
+        },
+        spec: {
+            ...template.spec,
+            nodeSelector: template.spec.nodeSelector ?? {},
+        },
+    };
+}
+
 export const reducer = (state: AppState, action: Action): AppState => {
     if (action.type === CreateReplicaSetType) {
         const { name, namespace, ownerRef, replicas, selector, template } = action.payload;
@@ -625,7 +644,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
                     spec: {
                         replicas,
                         selector,
-                        template,
+                        template: admitPodTemplateSpec(template),
                     },
                     status: {
                         observedGeneration: 1,
@@ -717,7 +736,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
                     spec: {
                         replicas,
                         selector: { matchLabels: template.metadata.labels ?? { app: name } },
-                        template,
+                        template: admitPodTemplateSpec(template),
                         strategy: strategy ?? { type: "RollingUpdate" },
                         ...(revisionHistoryLimit !== undefined ? { revisionHistoryLimit } : {}),
                         ...(minReadySeconds !== undefined ? { minReadySeconds } : {}),
@@ -754,14 +773,17 @@ export const reducer = (state: AppState, action: Action): AppState => {
                         namespace,
                         uid: crypto.randomUUID(),
                         creationTimestamp,
-                        ...(template.metadata?.labels && { labels: template.metadata.labels }),
-                        ...(template.metadata?.annotations && { annotations: template.metadata.annotations }),
+                        labels: template.metadata?.labels ?? {},
+                        annotations: template.metadata?.annotations ?? {},
                         ...(ownerReferences && { ownerReferences }),
                     },
                     status: {
                         phase: "Pending",
                     },
-                    spec: template.spec,
+                    spec: {
+                        ...template.spec,
+                        nodeSelector: template.spec.nodeSelector ?? {},
+                    },
                 },
             ],
         };
@@ -782,7 +804,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
             },
             spec: {
                 selector: { matchLabels: labels },
-                template,
+                template: admitPodTemplateSpec(template),
                 updateStrategy: { type: "RollingUpdate" },
             },
             status: {
@@ -996,7 +1018,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
                 completions,
                 parallelism,
                 backoffLimit,
-                template,
+                template: admitPodTemplateSpec(template),
             },
             status: {
                 active: 0,
@@ -1038,7 +1060,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
                         completions,
                         parallelism,
                         backoffLimit,
-                        template,
+                        template: admitPodTemplateSpec(template),
                     },
                 },
             },
@@ -1124,7 +1146,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
             spec: {
                 replicas,
                 selector: { matchLabels: labels },
-                template,
+                template: admitPodTemplateSpec(template),
                 serviceName,
                 podManagementPolicy: "OrderedReady",
                 updateStrategy: { type: "RollingUpdate" },
