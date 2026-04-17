@@ -238,10 +238,12 @@ export async function* kubectlApply(
                 const completions = typeof jobSpec?.completions === "number" ? jobSpec.completions : 1;
                 const parallelism = typeof jobSpec?.parallelism === "number" ? jobSpec.parallelism : 1;
                 const backoffLimit = typeof jobSpec?.backoffLimit === "number" ? jobSpec.backoffLimit : 6;
+                const successfulJobsHistoryLimit = typeof spec?.successfulJobsHistoryLimit === "number" ? spec.successfulJobsHistoryLimit : 3;
+                const failedJobsHistoryLimit = typeof spec?.failedJobsHistoryLimit === "number" ? spec.failedJobsHistoryLimit : 1;
                 if (!state.CronJobs.some(c => c.metadata.name === name && c.metadata.namespace === docNs)) {
                     if (!image) throw Error(`kubectl apply: CronJob "${name}": jobTemplate containers[0].image is required`);
                     if (!schedule) throw Error(`kubectl apply: CronJob "${name}": spec.schedule is required`);
-                    dispatch(createCronJob(name, { schedule, completions, parallelism, backoffLimit, template }, docNs));
+                    dispatch(createCronJob(name, { schedule, completions, parallelism, backoffLimit, successfulJobsHistoryLimit, failedJobsHistoryLimit, template }, docNs));
                     yield `cronjob.batch/${name} created`;
                 } else {
                     dispatch(patchResource("cronjob", name, { spec }, docNs));

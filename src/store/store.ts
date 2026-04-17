@@ -179,6 +179,8 @@ export interface CreateCronJobAction {
         completions: number;
         parallelism: number;
         backoffLimit: number;
+        successfulJobsHistoryLimit: number;
+        failedJobsHistoryLimit: number;
         template: import("../types/v1/Pod").PodTemplateSpec;
         creationTimestamp: string;
     };
@@ -437,7 +439,7 @@ export function updateJobStatus(
 
 export function createCronJob(
     name: string,
-    spec: { schedule: string; completions?: number; parallelism?: number; backoffLimit?: number; template: import("../types/v1/Pod").PodTemplateSpec },
+    spec: { schedule: string; completions?: number; parallelism?: number; backoffLimit?: number; successfulJobsHistoryLimit?: number; failedJobsHistoryLimit?: number; template: import("../types/v1/Pod").PodTemplateSpec },
     namespace = "default",
 ): CreateCronJobAction {
     return {
@@ -449,6 +451,8 @@ export function createCronJob(
             completions: spec.completions ?? 1,
             parallelism: spec.parallelism ?? 1,
             backoffLimit: spec.backoffLimit ?? 6,
+            successfulJobsHistoryLimit: spec.successfulJobsHistoryLimit ?? 3,
+            failedJobsHistoryLimit: spec.failedJobsHistoryLimit ?? 1,
             template: spec.template,
             creationTimestamp: new Date().toISOString(),
         },
@@ -1072,7 +1076,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
     }
     if (action.type === CreateCronJobType) {
-        const { name, namespace, schedule, completions, parallelism, backoffLimit, template, creationTimestamp } = action.payload;
+        const { name, namespace, schedule, completions, parallelism, backoffLimit, successfulJobsHistoryLimit, failedJobsHistoryLimit, template, creationTimestamp } = action.payload;
         const cj: CronJob = {
             metadata: {
                 uid: crypto.randomUUID(),
@@ -1085,6 +1089,8 @@ export const reducer = (state: AppState, action: Action): AppState => {
             spec: {
                 schedule,
                 concurrencyPolicy: "Allow",
+                successfulJobsHistoryLimit,
+                failedJobsHistoryLimit,
                 jobTemplate: {
                     spec: {
                         completions,

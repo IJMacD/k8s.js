@@ -86,6 +86,7 @@ export function useJobController(
                             active,
                             succeeded,
                             failed,
+                            completionTime: ts,
                             conditions: [
                                 {
                                     type: "Failed",
