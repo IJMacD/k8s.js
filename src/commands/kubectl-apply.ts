@@ -1,5 +1,5 @@
 import type { ActionDispatch } from "react";
-import type { Container, PodTemplateSpec } from "../types/v1/Pod";
+import type { Container, Probe, PodTemplateSpec } from "../types/v1/Pod";
 import {
     createCronJob,
     createDaemonSet,
@@ -14,6 +14,34 @@ import {
 import { readFile } from "./filesystem";
 
 /** Parse a raw containers/initContainers array, normalising types */
+function parseProbe(raw: unknown): Probe | undefined {
+    if (!raw || typeof raw !== "object") return undefined;
+    const r = raw as Record<string, unknown>;
+    const probe: Probe = {};
+    if (typeof r.initialDelaySeconds === "number") probe.initialDelaySeconds = r.initialDelaySeconds;
+    if (typeof r.periodSeconds       === "number") probe.periodSeconds       = r.periodSeconds;
+    if (typeof r.timeoutSeconds      === "number") probe.timeoutSeconds      = r.timeoutSeconds;
+    if (typeof r.successThreshold    === "number") probe.successThreshold    = r.successThreshold;
+    if (typeof r.failureThreshold    === "number") probe.failureThreshold    = r.failureThreshold;
+    if (r.httpGet && typeof r.httpGet === "object") {
+        const hg = r.httpGet as Record<string, unknown>;
+        probe.httpGet = {
+            path: typeof hg.path === "string" ? hg.path : "/",
+            port: typeof hg.port === "number" ? hg.port : String(hg.port ?? 80),
+            ...(typeof hg.scheme === "string" ? { scheme: hg.scheme as "HTTP" | "HTTPS" } : {}),
+        };
+    }
+    if (r.tcpSocket && typeof r.tcpSocket === "object") {
+        const ts = r.tcpSocket as Record<string, unknown>;
+        probe.tcpSocket = { port: typeof ts.port === "number" ? ts.port : String(ts.port ?? 80) };
+    }
+    if (r.exec && typeof r.exec === "object") {
+        const ex = r.exec as Record<string, unknown>;
+        probe.exec = { command: Array.isArray(ex.command) ? (ex.command as string[]) : [] };
+    }
+    return probe;
+}
+
 function parseContainerArray(raw: unknown): Container[] | undefined {
     if (!Array.isArray(raw) || raw.length === 0) return undefined;
     return (raw as Array<Record<string, unknown>>).map(c => ({
@@ -29,6 +57,9 @@ function parseContainerArray(raw: unknown): Container[] | undefined {
             }
             : {}),
         ...(Array.isArray(c.env) && c.env.length > 0 ? { env: c.env as Container["env"] } : {}),
+        ...(parseProbe(c.readinessProbe) ? { readinessProbe: parseProbe(c.readinessProbe) } : {}),
+        ...(parseProbe(c.livenessProbe)  ? { livenessProbe:  parseProbe(c.livenessProbe)  } : {}),
+        ...(parseProbe(c.startupProbe)   ? { startupProbe:   parseProbe(c.startupProbe)   } : {}),
     }));
 }
 

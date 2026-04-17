@@ -195,7 +195,12 @@ export function useKubelet(
             for (let j = 0; j < remainingApp; j++) {
                 const containerIndex  = readyContainerCount + j;
                 const isLastContainer = containerIndex === M - 1;
-                const readyAt         = initializedDelay + 1_500 + j * 1_000;
+                const container       = appContainers[containerIndex];
+                const probeDelay      = (
+                    (container.startupProbe?.initialDelaySeconds ?? 0) +
+                    (container.readinessProbe?.initialDelaySeconds ?? 0)
+                ) * 1_000;
+                const readyAt         = initializedDelay + 1_500 + j * 1_000 + probeDelay;
 
                 timersRef.current.push(setTimeout(() => {
                     const t = now();

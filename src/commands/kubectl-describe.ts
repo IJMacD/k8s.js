@@ -334,17 +334,36 @@ export async function* kubectlDescribe(
         const containerReady = pod.status.conditions?.find(c => c.type === "ContainersReady")?.status === "True";
 
         const containerStateLines = (
-            c: { name: string; image: string; ports?: import("../types/v1/Pod").ContainerPort[]; env?: import("../types/v1/Pod").EnvRecord[] },
+            c: { name: string; image: string; ports?: import("../types/v1/Pod").ContainerPort[]; env?: import("../types/v1/Pod").EnvRecord[]; readinessProbe?: import("../types/v1/Pod").Probe; livenessProbe?: import("../types/v1/Pod").Probe; startupProbe?: import("../types/v1/Pod").Probe },
             cStatus: import("../types/v1/Pod").ContainerStatus | undefined,
         ): string[] => {
             const fmtPort = (p: import("../types/v1/Pod").ContainerPort) =>
                 p.name ? `${p.containerPort}/${p.protocol ?? "TCP"} (${p.name})` : `${p.containerPort}/${p.protocol ?? "TCP"}`;
+            const fmtProbe = (probe: import("../types/v1/Pod").Probe): string => {
+                let handler = "<unknown>";
+                if (probe.httpGet) {
+                    const port = probe.httpGet.port;
+                    const path = probe.httpGet.path || "/";
+                    handler = `http-get http://:${port}${path}`;
+                } else if (probe.tcpSocket) {
+                    handler = `tcp-socket :${probe.tcpSocket.port}`;
+                } else if (probe.exec) {
+                    handler = `exec [${probe.exec.command.join(" ")}]`;
+                }
+                const delay   = probe.initialDelaySeconds ?? 0;
+                const timeout = probe.timeoutSeconds ?? 1;
+                const period  = probe.periodSeconds ?? 10;
+                return `${handler} delay=${delay}s timeout=${timeout}s period=${period}s`;
+            };
             const base = [
                 `   ${c.name}:`,
                 `    Image:          ${c.image}`,
                 `    Port:           ${c.ports?.length ? c.ports.map(fmtPort).join(", ") : "<none>"}`,
                 `    Host Port:      0/TCP`,
                 ...fmtEnvLines(c.env),
+                ...(c.livenessProbe  ? [`    Liveness:       ${fmtProbe(c.livenessProbe)}`]  : []),
+                ...(c.readinessProbe ? [`    Readiness:      ${fmtProbe(c.readinessProbe)}`] : []),
+                ...(c.startupProbe   ? [`    Startup:        ${fmtProbe(c.startupProbe)}`]   : []),
             ];
             // Use per-container status when available
             if (cStatus) {

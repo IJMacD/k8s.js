@@ -63,12 +63,26 @@ export interface PodSpec {
     containers: Container[]; // List of containers that will be part of the pod
 }
 
+export interface Probe {
+    initialDelaySeconds?: number; // Seconds after container start before the probe is first run
+    periodSeconds?: number;       // How often (in seconds) to perform the probe
+    timeoutSeconds?: number;      // Seconds after which the probe times out
+    successThreshold?: number;
+    failureThreshold?: number;
+    httpGet?: { path: string; port: number | string; scheme?: "HTTP" | "HTTPS" };
+    tcpSocket?: { port: number | string };
+    exec?: { command: string[] };
+}
+
 export interface Container {
     name: string; // Name of the container
     image: string; // Docker image to be used for the container
     ports?: ContainerPort[]; // Optional list of ports to be exposed by the container
     env?: EnvRecord[]; // Optional list of environment variables for the container
     resources?: ResourceRequirements; // Optional resource requirements for the container
+    readinessProbe?: Probe;
+    livenessProbe?: Probe;
+    startupProbe?: Probe;
 }
 
 export interface ContainerPort {
