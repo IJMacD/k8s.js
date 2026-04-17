@@ -75,3 +75,14 @@
   color: var(--text);
   font-size: 0.85em;
 }
+
+/* Fixed-layout variant: columns keep their widths regardless of content changes */
+.resource-tabs__table--fixed {
+  table-layout: fixed;
+}
+
+.resource-tabs__table--fixed td,
+.resource-tabs__table--fixed th {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

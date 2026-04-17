@@ -250,7 +250,16 @@ export function ResourceTabs({ Deployments, DaemonSets, StatefulSets, ReplicaSet
           </table>
         )}
         {activeTab === 'Pods' && (
-          <table className="resource-tabs__table">
+          <table className="resource-tabs__table resource-tabs__table--fixed">
+            <colgroup>
+              <col style={{ width: '9em' }}  />{/* Namespace */}
+              <col style={{ width: '22%' }}  />{/* Name — takes remaining space */}
+              <col style={{ width: '10em' }} />{/* Status */}
+              <col style={{ width: '8em' }}  />{/* Ready (squares) */}
+              <col style={{ width: '9em' }}  />{/* IP */}
+              <col style={{ width: '9em' }}  />{/* Node */}
+              <col style={{ width: '5em' }}  />{/* Age */}
+            </colgroup>
             <thead>
               <tr>
                 <th>Namespace</th>
