@@ -24,8 +24,10 @@ function ContainerSquares({ pod }: { pod: Pod }) {
       return s.ready ? '#22c55e' : '#f97316'; // app: green if ready, orange if not
     }
     if (s.state.terminated) {
-      // Completed init container: dark green — succeeded and done
-      return isInit ? '#15803d' : '#888';
+      // exitCode 0 = completed successfully → dark green
+      // exitCode non-zero = failed → red
+      if (s.state.terminated.exitCode === 0) return '#15803d';
+      return '#ef4444';
     }
     return '#888'; // waiting → grey
   };
@@ -34,7 +36,7 @@ function ContainerSquares({ pod }: { pod: Pod }) {
   const phaseColor = (): string => {
     switch (pod.status.phase) {
       case 'Running':   return '#22c55e';
-      case 'Succeeded': return '#6b7280';
+      case 'Succeeded': return '#15803d';
       case 'Failed':    return '#ef4444';
       default:          return '#888';
     }
