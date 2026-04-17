@@ -18,11 +18,12 @@ export function useReplicaSetController(
 ) {
     const { ReplicaSets, Pods } = state;
 
-    // Tracks how many pod-creation timers are currently in-flight per RS key (namespace/name).
-    // This ref is NOT cleared during effect cleanup so that creation timers survive re-runs
-    // caused by pod status updates (kubelet fires several updates per pod in quick succession,
-    // each of which would otherwise cancel and reschedule the creation timers indefinitely).
-    const creationInFlightRef = useRef<Map<string, number>>(new Map());
+    // Tracks in-flight pod-creation timers per RS key (namespace/name).
+    // Creation timers are NOT cancelled on effect re-run (they survive pod-status updates).
+    // lastDesired is the desired count at the time the timers were last scheduled — when
+    // the desired count changes we reset inFlight to 0 so stale in-flight counts from a
+    // previous scale cycle don't block scheduling the correct number of new pods.
+    const creationInFlightRef = useRef<Map<string, { inFlight: number; lastDesired: number }>>(new Map());
 
     useEffect(() => {
         // Only deletion/GC timers go here — they ARE cancelled on re-run so that stale
@@ -53,7 +54,10 @@ export function useReplicaSetController(
             );
 
             const actual   = ownedPods.length;
-            const inFlight = creationInFlightRef.current.get(rsKey) ?? 0;
+            const entry    = creationInFlightRef.current.get(rsKey);
+            // If desired changed since last scheduling cycle, treat inFlight as 0 so that
+            // stale timers from the previous cycle don't prevent correct pod counts.
+            const inFlight = (entry && entry.lastDesired === desired) ? entry.inFlight : 0;
             // "effective" counts both existing pods and those whose creation timers are pending.
             // This prevents re-runs from scheduling duplicate creates while timers are in flight.
             const effective = actual + inFlight;
@@ -62,7 +66,7 @@ export function useReplicaSetController(
                 // Create missing pods — timers are deliberately NOT added to deletionTimers
                 // so they survive effect re-runs triggered by pod status updates.
                 const toCreate = desired - effective;
-                creationInFlightRef.current.set(rsKey, inFlight + toCreate);
+                creationInFlightRef.current.set(rsKey, { inFlight: inFlight + toCreate, lastDesired: desired });
                 for (let i = 0; i < toCreate; i++) {
                     setTimeout(() => {
                         const podName = `${name}-${crypto.randomUUID().slice(0, 5)}`;
@@ -75,8 +79,8 @@ export function useReplicaSetController(
                             namespace,
                             { kind: "ReplicaSet", apiVersion: "apps/v1", name: rs.metadata.name, uid: rs.metadata.uid },
                         ));
-                        const cur = creationInFlightRef.current.get(rsKey) ?? 1;
-                        creationInFlightRef.current.set(rsKey, Math.max(0, cur - 1));
+                        const cur = creationInFlightRef.current.get(rsKey);
+                        if (cur) creationInFlightRef.current.set(rsKey, { ...cur, inFlight: Math.max(0, cur.inFlight - 1) });
                     }, RECONCILE_DELAY_MS * (i + 1));
                 }
             } else if (actual > desired) {

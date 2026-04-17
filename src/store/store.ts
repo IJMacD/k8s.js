@@ -767,6 +767,16 @@ export const reducer = (state: AppState, action: Action): AppState => {
     if (action.type === CreateDeploymentType) {
         const { name, namespace, replicas, template, strategy, revisionHistoryLimit, minReadySeconds } = action.payload;
         const creationTimestamp = new Date().toISOString();
+        // Ensure selector and template labels are always derived from the same source.
+        // If the template has no labels, fall back to { app: name } for BOTH so that
+        // pods stamped by the RS will always match the service selector.
+        const podLabels = template.metadata.labels && Object.keys(template.metadata.labels).length > 0
+            ? template.metadata.labels
+            : { app: name };
+        const normalizedTemplate: typeof template = {
+            ...template,
+            metadata: { ...template.metadata, labels: podLabels },
+        };
         return {
             ...state,
             Deployments: [
@@ -783,8 +793,8 @@ export const reducer = (state: AppState, action: Action): AppState => {
                     },
                     spec: {
                         replicas,
-                        selector: { matchLabels: template.metadata.labels ?? { app: name } },
-                        template: admitPodTemplateSpec(template),
+                        selector: { matchLabels: podLabels },
+                        template: admitPodTemplateSpec(normalizedTemplate),
                         strategy: strategy ?? { type: "RollingUpdate" },
                         ...(revisionHistoryLimit !== undefined ? { revisionHistoryLimit } : {}),
                         ...(minReadySeconds !== undefined ? { minReadySeconds } : {}),
