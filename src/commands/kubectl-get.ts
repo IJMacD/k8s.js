@@ -96,13 +96,34 @@ export async function* kubectlGet(
             const headers = [...nsHdr, "NAME", "READY", "STATUS", "RESTARTS", "AGE"];
             const rows = items.map(p => {
                 const total = p.spec.containers.length;
-                const ready =
-                    p.status.conditions?.find(c => c.type === "Ready")?.status === "True" ? total : 0;
+                // READY: use per-container statuses when available; fall back to condition flag
+                const readyCount = p.status.containerStatuses !== undefined
+                    ? p.status.containerStatuses.filter(s => s.ready).length
+                    : (p.status.conditions?.find(c => c.type === "ContainersReady")?.status === "True" ? total : 0);
+                // STATUS: show Init:K/N while init containers are still running
+                let statusStr = p.status.phase as string;
+                const totalInit = p.spec.initContainers?.length ?? 0;
+                if (p.status.phase === "Pending" && totalInit > 0) {
+                    const doneInit = (p.status.initContainerStatuses ?? [])
+                        .filter(s => s.state?.terminated !== undefined).length;
+                    if (doneInit < totalInit) {
+                        statusStr = `Init:${doneInit}/${totalInit}`;
+                    } else {
+                        // All init containers done but app containers not ready yet
+                        const anyCreating = (p.status.containerStatuses ?? [])
+                            .some(s => s.state?.waiting?.reason === "ContainerCreating");
+                        if (anyCreating) statusStr = "PodInitializing";
+                    }
+                } else if (p.status.phase === "Pending" && p.spec.nodeName) {
+                    const anyCreating = (p.status.containerStatuses ?? [])
+                        .some(s => s.state?.waiting?.reason === "ContainerCreating");
+                    if (anyCreating) statusStr = "ContainerCreating";
+                }
                 return [
                     ...nsCol(p.metadata.namespace),
                     p.metadata.name,
-                    `${ready}/${total}`,
-                    p.status.phase,
+                    `${readyCount}/${total}`,
+                    statusStr,
                     "0",
                     ageStr(p.metadata.creationTimestamp),
                 ];

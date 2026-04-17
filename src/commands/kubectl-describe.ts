@@ -2,7 +2,10 @@ import type { AppState } from "../store/store";
 
 type PodTemplate = {
     metadata: { labels?: Record<string, string> };
-    spec: { containers: import("../types/v1/Pod").Container[] };
+    spec: {
+        containers: import("../types/v1/Pod").Container[];
+        initContainers?: import("../types/v1/Pod").Container[];
+    };
 };
 
 function fmtEnvLines(env: import("../types/v1/Pod").EnvRecord[] | undefined): string[] {
@@ -22,9 +25,21 @@ function fmtEnvLines(env: import("../types/v1/Pod").EnvRecord[] | undefined): st
 function podTemplateLines(template: PodTemplate): string[] {
     const fmtPort = (p: import("../types/v1/Pod").ContainerPort) =>
         p.name ? `${p.containerPort}/${p.protocol ?? "TCP"} (${p.name})` : `${p.containerPort}/${p.protocol ?? "TCP"}`;
+    const initLines = template.spec.initContainers?.length
+        ? [
+            `  Init Containers:`,
+            ...template.spec.initContainers.flatMap(c => [
+                `   ${c.name}:`,
+                `    Image:  ${c.image}`,
+                `    Port:   <none>`,
+                ...fmtEnvLines(c.env),
+            ]),
+        ]
+        : [];
     return [
         `Pod Template:`,
         `  Labels:  ${Object.entries(template.metadata.labels ?? {}).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
+        ...initLines,
         `  Containers:`,
         ...template.spec.containers.flatMap(c => [
             `   ${c.name}:`,
@@ -318,7 +333,10 @@ export async function* kubectlDescribe(
 
         const containerReady = pod.status.conditions?.find(c => c.type === "ContainersReady")?.status === "True";
 
-        const containerStateLines = (c: { name: string; image: string; ports?: import("../types/v1/Pod").ContainerPort[]; env?: import("../types/v1/Pod").EnvRecord[] }): string[] => {
+        const containerStateLines = (
+            c: { name: string; image: string; ports?: import("../types/v1/Pod").ContainerPort[]; env?: import("../types/v1/Pod").EnvRecord[] },
+            cStatus: import("../types/v1/Pod").ContainerStatus | undefined,
+        ): string[] => {
             const fmtPort = (p: import("../types/v1/Pod").ContainerPort) =>
                 p.name ? `${p.containerPort}/${p.protocol ?? "TCP"} (${p.name})` : `${p.containerPort}/${p.protocol ?? "TCP"}`;
             const base = [
@@ -328,6 +346,34 @@ export async function* kubectlDescribe(
                 `    Host Port:      0/TCP`,
                 ...fmtEnvLines(c.env),
             ];
+            // Use per-container status when available
+            if (cStatus) {
+                if (cStatus.state.running) {
+                    return [...base,
+                        `    State:          Running`,
+                        `      Started:      ${cStatus.state.running.startedAt}`,
+                        `    Ready:          True`,
+                        `    Restart Count:  0`,
+                    ];
+                }
+                if (cStatus.state.terminated) {
+                    return [...base,
+                        `    State:          Terminated`,
+                        ...(cStatus.state.terminated.reason ? [`      Reason:       ${cStatus.state.terminated.reason}`] : []),
+                        `      Exit Code:    ${cStatus.state.terminated.exitCode}`,
+                        `    Ready:          False`,
+                        `    Restart Count:  0`,
+                    ];
+                }
+                // Waiting
+                return [...base,
+                    `    State:          Waiting`,
+                    ...(cStatus.state.waiting?.reason ? [`      Reason:       ${cStatus.state.waiting.reason}`] : []),
+                    `    Ready:          False`,
+                    `    Restart Count:  0`,
+                ];
+            }
+            // Fallback: derive state from pod phase (for pods without containerStatuses)
             switch (pod.status.phase) {
                 case "Running":
                     return [...base,
@@ -352,7 +398,6 @@ export async function* kubectlDescribe(
                         `    Restart Count:  0`,
                     ];
                 default:
-                    // Unscheduled (no nodeName yet): container has not started creating
                     if (!pod.spec.nodeName) {
                         return [...base,
                             `    State:          Waiting`,
@@ -367,6 +412,41 @@ export async function* kubectlDescribe(
                         `    Restart Count:  0`,
                     ];
             }
+        };
+
+        // Init container state lines (uses initContainerStatuses)
+        const initContainerLines = (
+            ic: import("../types/v1/Pod").Container,
+        ): string[] => {
+            const icStatus = pod.status.initContainerStatuses?.find(s => s.name === ic.name);
+            const base = [
+                `   ${ic.name}:`,
+                `    Image:          ${ic.image}`,
+                `    Port:           <none>`,
+                ...fmtEnvLines(ic.env),
+            ];
+            if (icStatus?.state.terminated) {
+                return [...base,
+                    `    State:          Terminated`,
+                    `      Reason:       Completed`,
+                    `      Exit Code:    0`,
+                    `    Ready:          True`,
+                    `    Restart Count:  0`,
+                ];
+            }
+            if (icStatus?.state.waiting) {
+                return [...base,
+                    `    State:          Waiting`,
+                    `      Reason:       ${icStatus.state.waiting.reason}`,
+                    `    Ready:          False`,
+                    `    Restart Count:  0`,
+                ];
+            }
+            return [...base,
+                `    State:          Waiting`,
+                `    Ready:          False`,
+                `    Restart Count:  0`,
+            ];
         };
 
         // Synthetic events based on pod phase
@@ -415,8 +495,15 @@ export async function* kubectlDescribe(
             `Status:           ${pod.status.phase}`,
             `IP:               ${pod.status.podIP ?? "<none>"}`,
             ``,
+            ...(pod.spec.initContainers?.length ? [
+                `Init Containers:`,
+                ...pod.spec.initContainers.flatMap(initContainerLines),
+                ``,
+            ] : []),
             `Containers:`,
-            ...pod.spec.containers.flatMap(containerStateLines),
+            ...pod.spec.containers.flatMap(c =>
+                containerStateLines(c, pod.status.containerStatuses?.find(s => s.name === c.name)),
+            ),
             ``,
             `Conditions:`,
             `  Type              Status`,

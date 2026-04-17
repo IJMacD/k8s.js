@@ -30,6 +30,22 @@ export interface PodStatus {
     hostIP?: string; // Optional IP address of the node hosting the pod
     podIP?: string; // Optional IP address assigned to the pod
     startTime?: string; // Optional ISO 8601 format timestamp indicating when the pod started running
+    containerStatuses?: ContainerStatus[];
+    initContainerStatuses?: ContainerStatus[];
+}
+
+export interface ContainerStatus {
+    name: string;
+    ready: boolean;
+    started: boolean;
+    restartCount: number;
+    state: ContainerState;
+}
+
+export interface ContainerState {
+    running?: { startedAt: string };
+    waiting?: { reason: string };
+    terminated?: { exitCode: number; reason?: string };
 }
 
 export interface PodCondition {
@@ -43,6 +59,7 @@ export interface PodSpec {
     nodeName?: string; // Name of the node the pod is scheduled on
     nodeSelector?: Record<string, string>; // Node label selector constraints for scheduling
     restartPolicy?: "Always" | "OnFailure" | "Never";
+    initContainers?: Container[]; // Optional list of init containers that run before app containers
     containers: Container[]; // List of containers that will be part of the pod
 }
 

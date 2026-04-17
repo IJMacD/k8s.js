@@ -13,9 +13,8 @@ import {
 } from "../store/store";
 import { readFile } from "./filesystem";
 
-/** Parse the containers array out of a raw pod spec object, normalising types */
-function parseContainers(podSpec: unknown): Container[] | undefined {
-    const raw = (podSpec as Record<string, unknown> | undefined)?.containers;
+/** Parse a raw containers/initContainers array, normalising types */
+function parseContainerArray(raw: unknown): Container[] | undefined {
     if (!Array.isArray(raw) || raw.length === 0) return undefined;
     return (raw as Array<Record<string, unknown>>).map(c => ({
         name: typeof c.name === "string" ? c.name : "",
@@ -33,6 +32,11 @@ function parseContainers(podSpec: unknown): Container[] | undefined {
     }));
 }
 
+/** Parse the containers array out of a raw pod spec object, normalising types */
+function parseContainers(podSpec: unknown): Container[] | undefined {
+    return parseContainerArray((podSpec as Record<string, unknown> | undefined)?.containers);
+}
+
 /** Build a PodTemplateSpec from a raw YAML template object */
 function parseTemplate(rawTemplate: unknown, defaultName: string, defaultNamespace: string): PodTemplateSpec {
     const tmpl = rawTemplate as Record<string, unknown> | undefined;
@@ -40,6 +44,7 @@ function parseTemplate(rawTemplate: unknown, defaultName: string, defaultNamespa
     const labels = (rawMeta?.labels ?? {}) as Record<string, string>;
     const rawSpec = tmpl?.spec as Record<string, unknown> | undefined;
     const containers = parseContainers(rawSpec) ?? [];
+    const initContainers = parseContainerArray(rawSpec?.initContainers);
     const restartPolicy = typeof rawSpec?.restartPolicy === "string"
         ? rawSpec.restartPolicy as "Always" | "OnFailure" | "Never"
         : undefined;
@@ -52,6 +57,7 @@ function parseTemplate(rawTemplate: unknown, defaultName: string, defaultNamespa
         },
         spec: {
             containers,
+            ...(initContainers?.length ? { initContainers } : {}),
             ...(restartPolicy ? { restartPolicy } : {}),
             ...(nodeName ? { nodeName } : {}),
         },
