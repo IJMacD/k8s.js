@@ -124,12 +124,20 @@ export function useScheduler(
             // Mark as being scheduled now (prevents duplicate binds during the timer window)
             scheduledRef.current.add(pod.metadata.uid);
 
-            // Least-loaded: pick node with fewest pods currently assigned
-            const chosen = eligibleNodes.reduce((best, node) => {
-                const count = Pods.filter(p => p.spec.nodeName === node.metadata.name).length;
-                const bestCount = Pods.filter(p => p.spec.nodeName === best.metadata.name).length;
-                return count < bestCount ? node : best;
-            });
+            // Spread-aware scoring: prefer nodes with fewer same-owner pods (spread),
+            // then break ties by fewest total pods (least-loaded).
+            const ownerUid = pod.metadata.ownerReferences?.[0]?.uid ?? null;
+            const nodeScore = (node: KubeNode) => {
+                const nodePods = Pods.filter(p => p.spec.nodeName === node.metadata.name);
+                const spreadCount = ownerUid
+                    ? nodePods.filter(p => p.metadata.ownerReferences?.[0]?.uid === ownerUid).length
+                    : 0;
+                // Lower spread count is better; use total count as a tiebreaker with small weight
+                return spreadCount * 1000 + nodePods.length;
+            };
+            const chosen = eligibleNodes.reduce((best, node) =>
+                nodeScore(node) < nodeScore(best) ? node : best
+            );
 
             timersRef.current.push(setTimeout(() => {
                 dispatch(bindPodToNode(pod.metadata.name, pod.metadata.namespace, chosen.metadata.name));
