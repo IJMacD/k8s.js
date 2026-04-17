@@ -1,6 +1,83 @@
 import { useEffect, useState } from 'react';
 import type { AppState } from '../store/store';
+import type { Pod } from '../types/v1/Pod';
 import './ResourceTabs.css';
+
+/** Coloured squares representing each container's state in a Pod row. */
+function ContainerSquares({ pod }: { pod: Pod }) {
+  const initContainers = pod.spec.initContainers ?? [];
+  const appContainers  = pod.spec.containers;
+
+  // Derive per-container colour from containerStatuses / initContainerStatuses.
+  // green  = running + ready
+  // orange = running but not yet ready
+  // grey   = not running (waiting, terminated, or no status yet)
+  const squareColor = (name: string, isInit: boolean): string => {
+    const statuses = isInit
+      ? (pod.status.initContainerStatuses ?? [])
+      : (pod.status.containerStatuses     ?? []);
+    const s = statuses.find(cs => cs.name === name);
+    if (!s) return '#888'; // no status yet → grey
+    if (s.state.running) {
+      // Init containers have ready=false while running (real k8s semantics) — still show as green
+      if (isInit) return '#22c55e';
+      return s.ready ? '#22c55e' : '#f97316'; // app: green if ready, orange if not
+    }
+    if (s.state.terminated) {
+      // Completed init container: dark green — succeeded and done
+      return isInit ? '#15803d' : '#888';
+    }
+    return '#888'; // waiting → grey
+  };
+
+  // Fallback for pods that have no containerStatuses at all: derive from phase
+  const phaseColor = (): string => {
+    switch (pod.status.phase) {
+      case 'Running':   return '#22c55e';
+      case 'Succeeded': return '#6b7280';
+      case 'Failed':    return '#ef4444';
+      default:          return '#888';
+    }
+  };
+
+  const hasStatuses = (pod.status.containerStatuses?.length ?? 0) > 0 ||
+                      (pod.status.initContainerStatuses?.length ?? 0) > 0;
+
+  return (
+    <span style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}>
+      {initContainers.map(ic => (
+        <span
+          key={`init-${ic.name}`}
+          title={`init: ${ic.name}`}
+          style={{
+            display: 'inline-block',
+            width: '10px',
+            height: '10px',
+            borderRadius: '2px',
+            background: hasStatuses ? squareColor(ic.name, true) : '#888',
+            opacity: 0.7,
+          }}
+        />
+      ))}
+      {initContainers.length > 0 && (
+        <span style={{ color: 'var(--muted, #888)', fontSize: '0.7em', margin: '0 1px' }}>|</span>
+      )}
+      {appContainers.map(c => (
+        <span
+          key={c.name}
+          title={c.name}
+          style={{
+            display: 'inline-block',
+            width: '10px',
+            height: '10px',
+            borderRadius: '2px',
+            background: hasStatuses ? squareColor(c.name, false) : phaseColor(),
+          }}
+        />
+      ))}
+    </span>
+  );
+}
 
 function age(timestamp: string): string {
   const seconds = Math.floor((Date.now() - new Date(timestamp).getTime()) / 1000);
@@ -181,21 +258,32 @@ export function ResourceTabs({ Deployments, DaemonSets, StatefulSets, ReplicaSet
                 <th>Status</th>
                 <th>Ready</th>
                 <th>IP</th>
-                <th>Containers</th>
+                <th>Node</th>
                 <th>Age</th>
               </tr>
             </thead>
             <tbody>
               {Pods.map(p => {
-                const ready = p.status.conditions?.find(c => c.type === 'Ready')?.status === 'True';
+                const totalInit = p.spec.initContainers?.length ?? 0;
+                let statusStr = p.status.phase as string;
+                if (p.status.phase === 'Pending' && totalInit > 0) {
+                  const doneInit = (p.status.initContainerStatuses ?? [])
+                    .filter(s => s.state?.terminated !== undefined).length;
+                  if (doneInit < totalInit) statusStr = `Init:${doneInit}/${totalInit}`;
+                  else if ((p.status.containerStatuses ?? []).some(s => s.state?.waiting?.reason === 'ContainerCreating'))
+                    statusStr = 'PodInitializing';
+                } else if (p.status.phase === 'Pending' && p.spec.nodeName) {
+                  if ((p.status.containerStatuses ?? []).some(s => s.state?.waiting?.reason === 'ContainerCreating'))
+                    statusStr = 'ContainerCreating';
+                }
                 return (
                   <tr key={`${p.metadata.namespace}/${p.metadata.name}`}>
                     <td>{p.metadata.namespace}</td>
                     <td>{p.metadata.name}</td>
-                    <td>{p.status.phase}</td>
-                    <td>{ready ? '1/1' : '0/1'}</td>
+                    <td>{statusStr}</td>
+                    <td><ContainerSquares pod={p} /></td>
                     <td>{p.status.podIP ?? '—'}</td>
-                    <td>{p.spec.containers.map(c => c.image).join(', ')}</td>
+                    <td>{p.spec.nodeName ?? '—'}</td>
                     <AgeCell timestamp={p.metadata.creationTimestamp} />
                   </tr>
                 );
