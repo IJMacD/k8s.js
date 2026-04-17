@@ -117,24 +117,51 @@ export function useKubelet(
                         }));
                     }, initializedDelay));
                 } else {
-                    // Intermediate completions (all remaining init containers except the last)
-                    for (let j = 0; j < remainingInit - 1; j++) {
-                        const doneAfterThis = doneInitCount + j + 1;
+                    // For each remaining init container, fire two timers:
+                    //   +500ms into its slot → running (so visitors see it go green briefly)
+                    //   at the end of its slot → terminated, next one waiting
+                    for (let j = 0; j < remainingInit; j++) {
+                        const realIndex     = doneInitCount + j;
+                        const slotStart     = scheduledDelay + j * 2_000;
+                        const isLast        = j === remainingInit - 1;
+                        const doneAfterThis = realIndex + 1;
+
+                        // Running state: 500ms into this init container's slot
                         timersRef.current.push(setTimeout(() => {
                             dispatch(updatePodStatus(name, namespace, {
                                 initContainerStatuses: initContainers.map((ic, idx) => ({
                                     name: ic.name,
-                                    ready: idx < doneAfterThis,
-                                    started: idx <= doneAfterThis,
+                                    ready: false,
+                                    started: idx <= realIndex,
                                     restartCount: 0,
-                                    state: idx < doneAfterThis
+                                    state: idx < realIndex
                                         ? { terminated: { exitCode: 0 } }
-                                        : idx === doneAfterThis
-                                        ? { waiting: { reason: `Init:${doneAfterThis}/${N}` } }
+                                        : idx === realIndex
+                                        ? { running: { startedAt: now() } }
                                         : { waiting: { reason: "PodInitializing" } },
                                 })),
                             }));
-                        }, scheduledDelay + (j + 1) * 2_000));
+                        }, slotStart + 500));
+
+                        // Termination: only needed for non-last ones;
+                        // the last one is handled by the Initialized=True timer below
+                        if (!isLast) {
+                            timersRef.current.push(setTimeout(() => {
+                                dispatch(updatePodStatus(name, namespace, {
+                                    initContainerStatuses: initContainers.map((ic, idx) => ({
+                                        name: ic.name,
+                                        ready: idx < doneAfterThis,
+                                        started: idx <= doneAfterThis,
+                                        restartCount: 0,
+                                        state: idx < doneAfterThis
+                                            ? { terminated: { exitCode: 0 } }
+                                            : idx === doneAfterThis
+                                            ? { waiting: { reason: `Init:${doneAfterThis}/${N}` } }
+                                            : { waiting: { reason: "PodInitializing" } },
+                                    })),
+                                }));
+                            }, scheduledDelay + (j + 1) * 2_000));
+                        }
                     }
 
                     // Last remaining init container terminates → fire Initialized=True
