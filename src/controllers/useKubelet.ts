@@ -192,6 +192,12 @@ export function useKubelet(
             }
 
             // ── Per-container Running transitions ────────────────────────────
+            // Each container gets TWO timers:
+            //   runningAt  → container is Running but NOT yet ready (shows orange in UI)
+            //   readyAt    → container becomes Ready (shows green)
+            // The gap between them is at least MIN_RUNNING_BEFORE_READY so orange is always visible.
+            const MIN_RUNNING_BEFORE_READY = 1_000;
+
             for (let j = 0; j < remainingApp; j++) {
                 const containerIndex  = readyContainerCount + j;
                 const isLastContainer = containerIndex === M - 1;
@@ -200,7 +206,48 @@ export function useKubelet(
                     (container.startupProbe?.initialDelaySeconds ?? 0) +
                     (container.readinessProbe?.initialDelaySeconds ?? 0)
                 ) * 1_000;
-                const readyAt         = initializedDelay + 1_500 + j * 1_000 + probeDelay;
+                const runningAt = initializedDelay + 1_500 + j * 1_000;
+                const readyAt   = runningAt + Math.max(probeDelay, MIN_RUNNING_BEFORE_READY);
+
+                // Timer 1: container starts Running but is not yet ready → orange square.
+                // When the first app container starts, also promote phase→Running and assign the pod IP.
+                // (Real k8s: phase=Running as soon as any container is running; IP assigned at pod setup time.)
+                timersRef.current.push(setTimeout(() => {
+                    const t = now();
+                    const isFirstContainer = containerIndex === 0;
+                    const podIP  = isFirstContainer
+                        ? (node?.spec.podCIDR
+                            ? podIPFromCIDR(node.spec.podCIDR)
+                            : `10.${rand(0, 255)}.${rand(0, 255)}.${rand(2, 254)}`)
+                        : undefined;
+                    const hostIP = isFirstContainer
+                        ? node?.status.addresses.find(a => a.type === "InternalIP")?.address
+                        : undefined;
+                    dispatch(updatePodStatus(name, namespace, {
+                        ...(isFirstContainer && {
+                            phase:     "Running",
+                            startTime: t,
+                            podIP,
+                            ...(hostIP && { hostIP }),
+                            conditions: [
+                                { type: "PodScheduled",    status: "True",  lastTransitionTime: t },
+                                { type: "Initialized",     status: "True",  lastTransitionTime: t },
+                                { type: "ContainersReady", status: "False", lastTransitionTime: t },
+                                { type: "Ready",           status: "False", lastTransitionTime: t },
+                            ],
+                        }),
+                        containerStatuses: appContainers.map((c, idx) => ({
+                            name: c.name,
+                            // Containers before this one are already Ready; this one is not.
+                            ready:        idx < containerIndex,
+                            started:      idx <= containerIndex,
+                            restartCount: 0,
+                            state: idx <= containerIndex
+                                ? { running: { startedAt: t } }
+                                : { waiting: { reason: "ContainerCreating" } },
+                        })),
+                    }));
+                }, runningAt));
 
                 timersRef.current.push(setTimeout(() => {
                     const t = now();
