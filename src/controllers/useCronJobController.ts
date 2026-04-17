@@ -211,9 +211,15 @@ export function useCronJobController(
         }
     }, [Jobs, CronJobs, dispatch]);
 
-    // Cancel all pending timers on unmount
+    // Cancel all pending timers on unmount.
+    // The map must also be cleared so that React Strict Mode's simulated
+    // unmount/remount cycle doesn't leave stale uid entries that prevent
+    // schedulers from being re-registered on the real mount.
     useEffect(() => {
         const map = schedulersRef.current;
-        return () => map.forEach(cancel => cancel());
+        return () => {
+            map.forEach(cancel => cancel());
+            map.clear();
+        };
     }, []);
 }
