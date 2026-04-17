@@ -32,6 +32,18 @@ function ContainerSquares({ pod }: { pod: Pod }) {
     return '#888'; // waiting → grey
   };
 
+  const squareOpacity = (name: string, isInit: boolean): number => {
+    // If running it should be fully opaque. If waiting or terminated, show as semi-transparent to indicate not currently running.
+    // In light mode semi-transparent should be 0.3, but in dark mode 0.7 to be visible against the dark background.
+    const statuses = isInit
+      ? (pod.status.initContainerStatuses ?? [])
+      : (pod.status.containerStatuses ?? []);
+    const s = statuses.find(cs => cs.name === name);
+    if (!s) return 0.7; // no status yet → semi-transparent
+    if (s.state.running) return 1; // running → fully opaque
+    return 0.3 + 0.4 * (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 1 : 0); // waiting or terminated → semi-transparent
+  }
+
   // Fallback for pods that have no containerStatuses at all: derive from phase
   const phaseColor = (): string => {
     switch (pod.status.phase) {
@@ -57,7 +69,7 @@ function ContainerSquares({ pod }: { pod: Pod }) {
             height: '10px',
             borderRadius: '2px',
             background: hasStatuses ? squareColor(ic.name, true) : '#888',
-            opacity: 0.7,
+            opacity: hasStatuses ? squareOpacity(ic.name, true) : 0.7,
           }}
         />
       ))}
@@ -74,6 +86,7 @@ function ContainerSquares({ pod }: { pod: Pod }) {
             height: '10px',
             borderRadius: '2px',
             background: hasStatuses ? squareColor(c.name, false) : phaseColor(),
+            opacity: hasStatuses ? squareOpacity(c.name, false) : 0.7,
           }}
         />
       ))}

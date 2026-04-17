@@ -232,24 +232,33 @@ export function useKubelet(
                             containerStatuses: newContainerStatuses,
                         }));
 
-                        // Batch pods complete ~2 s after reaching Running
+                        // Batch pods complete ~2 s after reaching Running.
+                        // With BATCH_FAILURE_PROBABILITY one random container exits non-zero.
                         if (isBatch) {
                             timersRef.current.push(setTimeout(() => {
                                 const completionTime = now();
+                                const failIdx = Math.random() < BATCH_FAILURE_PROBABILITY
+                                    ? rand(0, appContainers.length - 1)
+                                    : -1;
+                                const podFailed = failIdx >= 0;
                                 dispatch(updatePodStatus(name, namespace, {
-                                    phase: "Succeeded",
+                                    phase: podFailed ? "Failed" : "Succeeded",
                                     conditions: [
                                         { type: "PodScheduled",    status: "True",  lastTransitionTime: t },
                                         { type: "Initialized",     status: "True",  lastTransitionTime: t },
                                         { type: "ContainersReady", status: "False", lastTransitionTime: completionTime },
                                         { type: "Ready",           status: "False", lastTransitionTime: completionTime },
                                     ],
-                                    containerStatuses: appContainers.map(c => ({
+                                    containerStatuses: appContainers.map((c, idx) => ({
                                         name: c.name,
                                         ready:        false,
                                         started:      false,
                                         restartCount: 0,
-                                        state: { terminated: { exitCode: 0, reason: "Completed" } },
+                                        state: {
+                                            terminated: idx === failIdx
+                                                ? { exitCode: 1, reason: "Error" }
+                                                : { exitCode: 0, reason: "Completed" },
+                                        },
                                     })),
                                 }));
                             }, 2_000));
@@ -277,6 +286,9 @@ export function useKubelet(
         };
     }, []);
 }
+
+/** Probability that a batch pod container exits with a non-zero code. */
+const BATCH_FAILURE_PROBABILITY = 0.1;
 
 function rand(min: number, max: number) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
