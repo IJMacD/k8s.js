@@ -308,6 +308,54 @@ function resolveViaService(svcName: string, svcNs: string, portHint: number, sta
 }
 
 // ---------------------------------------------------------------------------
+// Resolve all env vars for the first container of a pod.
+// envFrom is expanded first (lower priority); env entries override.
+// ---------------------------------------------------------------------------
+function resolveEnv(pod: AppState["Pods"][number], state: AppState): Array<[string, string]> {
+    const container = pod.spec.containers[0];
+    if (!container) return [];
+    const resolved: Record<string, string> = {};
+
+    for (const ef of container.envFrom ?? []) {
+        const prefix = ef.prefix ?? "";
+        if (ef.configMapRef) {
+            const cm = state.ConfigMaps.find(
+                c => c.metadata.name === ef.configMapRef!.name && c.metadata.namespace === pod.metadata.namespace,
+            );
+            if (cm) for (const [k, v] of Object.entries(cm.data)) resolved[prefix + k] = v;
+        }
+        if (ef.secretRef) {
+            const secret = state.Secrets.find(
+                s => s.metadata.name === ef.secretRef!.name && s.metadata.namespace === pod.metadata.namespace,
+            );
+            if (secret) for (const [k, v] of Object.entries(secret.data)) resolved[prefix + k] = v;
+        }
+    }
+
+    for (const e of container.env ?? []) {
+        if (e.value != null) {
+            resolved[e.name] = e.value;
+        } else if (e.valueFrom?.configMapKeyRef) {
+            const ref = e.valueFrom.configMapKeyRef;
+            const cm = state.ConfigMaps.find(
+                c => c.metadata.name === ref.name && c.metadata.namespace === pod.metadata.namespace,
+            );
+            resolved[e.name] = cm?.data[ref.key] ?? "";
+        } else if (e.valueFrom?.secretKeyRef) {
+            const ref = e.valueFrom.secretKeyRef;
+            const secret = state.Secrets.find(
+                s => s.metadata.name === ref.name && s.metadata.namespace === pod.metadata.namespace,
+            );
+            resolved[e.name] = secret?.data[ref.key] ?? "";
+        } else if (e.valueFrom?.fieldRef) {
+            resolved[e.name] = `(${e.valueFrom.fieldRef.fieldPath})`;
+        }
+    }
+
+    return Object.entries(resolved);
+}
+
+// ---------------------------------------------------------------------------
 // Simulated fetch — used by the Browser pane (returns structured data)
 // ---------------------------------------------------------------------------
 export interface SimResponse {
@@ -377,12 +425,29 @@ export function clusterFetch(rawUrl: string, state: AppState): SimResponse | Sim
         return base;
     })();
 
+    const pod = state.Pods.find(p => p.metadata.name === target.podName && p.metadata.namespace === target.podNamespace);
+    const envEntries = pod ? resolveEnv(pod, state) : [];
+    const envSection = envEntries.length > 0
+        ? [
+            `<h2 style="font-family:monospace;font-size:14px;margin:16px 0 6px">Environment</h2>`,
+            `<table style="font-family:monospace;font-size:12px;border-collapse:collapse">`,
+            `<tr><th style="text-align:left;padding:2px 16px 2px 0;opacity:0.6">Variable</th><th style="text-align:left;padding:2px 0">Value</th></tr>`,
+            ...envEntries.map(([k, v]) =>
+                `<tr><td style="padding:1px 16px 1px 0;color:#5b8dd9">${esc(k)}</td><td style="padding:1px 0">${esc(v)}</td></tr>`,
+            ),
+            `</table>`,
+        ]
+        : [];
+
     const body = [
         `<!DOCTYPE html>`,
         `<html><head><title>Welcome to ${esc(host)}</title></head>`,
-        `<body>`,
-        `<h1>Hello from ${esc(target.podName)}</h1>`,
-        `<p>Pod IP: ${esc(target.resolvedIP)} | Port: ${target.port} | Path: ${esc(path)}</p>`,
+        `<body style="font-family:sans-serif;padding:16px 24px">`,
+        `<h1 style="font-family:monospace;font-size:16px;text-align:center">${esc(target.podName)}</h1>`,
+        `<p style="font-family:monospace;font-size:12px;opacity:0.7;text-align:center">`,
+        `Pod IP: ${esc(target.resolvedIP)} | Port: ${target.port} | Path: ${esc(path)}`,
+        `</p>`,
+        ...envSection,
         `</body></html>`,
     ].join("\n");
 
