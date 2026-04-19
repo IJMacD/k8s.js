@@ -130,8 +130,8 @@ function App() {
 
   return (
     <>
-      <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '0 16px' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '0 16px', flexShrink: 0 }}>
           <h1 style={{ margin: '16px 0' }}>k8s.js</h1>
           <input
             ref={fileInputRef}
@@ -170,6 +170,7 @@ function App() {
           Secrets={store.Secrets}
           PersistentVolumes={store.PersistentVolumes}
           PersistentVolumeClaims={store.PersistentVolumeClaims}
+          onAdd={openEditor}
         />
       </div>
       {/* Bottom panel — always mounted to preserve Console/Browser state */}
