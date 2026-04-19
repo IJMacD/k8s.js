@@ -1,10 +1,12 @@
 import type { ActionDispatch } from "react";
 import type { Container, Probe, PodTemplateSpec } from "../types/v1/Pod";
 import {
+    createConfigMap,
     createCronJob,
     createDaemonSet,
     createDeployment,
     createJob,
+    createSecret,
     createService,
     createStatefulSet,
     patchResource,
@@ -56,6 +58,7 @@ function parseContainerArray(raw: unknown): Container[] | undefined {
                 })),
             }
             : {}),
+        ...(Array.isArray(c.envFrom) && c.envFrom.length > 0 ? { envFrom: c.envFrom as Container["envFrom"] } : {}),
         ...(Array.isArray(c.env) && c.env.length > 0 ? { env: c.env as Container["env"] } : {}),
         ...(parseProbe(c.readinessProbe) ? { readinessProbe: parseProbe(c.readinessProbe) } : {}),
         ...(parseProbe(c.livenessProbe)  ? { livenessProbe:  parseProbe(c.livenessProbe)  } : {}),
@@ -248,6 +251,35 @@ export async function* kubectlApply(
                 } else {
                     dispatch(patchResource("cronjob", name, { spec }, docNs));
                     yield `cronjob.batch/${name} configured`;
+                }
+                break;
+            }
+            case "configmap": {
+                const data = (typeof r.data === "object" && r.data !== null ? r.data : {}) as Record<string, string>;
+                const binaryData = (typeof r.binaryData === "object" && r.binaryData !== null ? r.binaryData : undefined) as Record<string, string> | undefined;
+                const labels = (meta?.labels ?? {}) as Record<string, string>;
+                const annotations = (meta?.annotations ?? {}) as Record<string, string>;
+                if (!state.ConfigMaps.some(cm => cm.metadata.name === name && cm.metadata.namespace === docNs)) {
+                    dispatch(createConfigMap(name, { data, binaryData, labels, annotations, creationTimestamp: new Date().toISOString() }, docNs));
+                    yield `configmap/${name} created`;
+                } else {
+                    dispatch(patchResource("configmap", name, { data }, docNs));
+                    yield `configmap/${name} configured`;
+                }
+                break;
+            }
+            case "secret": {
+                const secretType = typeof r.type === "string" ? r.type : "Opaque";
+                const data = (typeof r.data === "object" && r.data !== null ? r.data : {}) as Record<string, string>;
+                const stringData = (typeof r.stringData === "object" && r.stringData !== null ? r.stringData : undefined) as Record<string, string> | undefined;
+                const labels = (meta?.labels ?? {}) as Record<string, string>;
+                const annotations = (meta?.annotations ?? {}) as Record<string, string>;
+                if (!state.Secrets.some(s => s.metadata.name === name && s.metadata.namespace === docNs)) {
+                    dispatch(createSecret(name, { secretType, data, stringData, labels, annotations, creationTimestamp: new Date().toISOString() }, docNs));
+                    yield `secret/${name} created`;
+                } else {
+                    dispatch(patchResource("secret", name, { data }, docNs));
+                    yield `secret/${name} configured`;
                 }
                 break;
             }

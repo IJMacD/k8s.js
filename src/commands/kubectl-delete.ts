@@ -1,11 +1,13 @@
 import type { ActionDispatch } from "react";
 import {
+    deleteConfigMap,
     deleteCronJob,
     deleteDaemonSet,
     deleteDeployment,
     deleteJob,
     deletePod,
     deleteReplicaSet,
+    deleteSecret,
     deleteService,
     deleteStatefulSet,
     type Action,
@@ -52,6 +54,8 @@ export async function* kubectlDelete(
             case "node": case "nodes": return "node";
             case "daemonset": case "daemonsets": case "ds": return "daemonset";
             case "statefulset": case "statefulsets": case "sts": return "statefulset";
+            case "configmap": case "configmaps": case "cm": return "configmap";
+            case "secret": case "secrets": return "secret";
             default: return null;
         }
     };
@@ -71,6 +75,8 @@ export async function* kubectlDelete(
             case "node": names = state.Nodes.map(n => n.metadata.name); break;
             case "daemonset": names = state.DaemonSets.filter(ds => ds.metadata.namespace === namespace).map(ds => ds.metadata.name); break;
             case "statefulset": names = state.StatefulSets.filter(sts => sts.metadata.namespace === namespace).map(sts => sts.metadata.name); break;
+            case "configmap": names = state.ConfigMaps.filter(cm => cm.metadata.namespace === namespace).map(cm => cm.metadata.name); break;
+            case "secret": names = state.Secrets.filter(s => s.metadata.namespace === namespace).map(s => s.metadata.name); break;
         }
     }
 
@@ -140,6 +146,20 @@ export async function* kubectlDelete(
                 const nodePods = state.Pods.filter(p => p.spec.nodeName === name);
                 for (const pod of nodePods) dispatch(deletePod(pod.metadata.name, pod.metadata.namespace));
                 lines.push(`node "${name}" deleted`);
+                break;
+            }
+            case "configmap": {
+                const cm = state.ConfigMaps.find(c => c.metadata.name === name && c.metadata.namespace === namespace);
+                if (!cm) throw Error(`Error from server (NotFound): configmaps "${name}" not found`);
+                dispatch(deleteConfigMap(name, namespace));
+                lines.push(`configmap "${name}" deleted`);
+                break;
+            }
+            case "secret": {
+                const sec = state.Secrets.find(s => s.metadata.name === name && s.metadata.namespace === namespace);
+                if (!sec) throw Error(`Error from server (NotFound): secrets "${name}" not found`);
+                dispatch(deleteSecret(name, namespace));
+                lines.push(`secret "${name}" deleted`);
                 break;
             }
         }

@@ -7,6 +7,8 @@ import type { Service, Endpoints } from "../types/v1/Service";
 import type { KubeNode } from "../types/v1/Node";
 import type { Job, CronJob } from "../types/batch/v1/Job";
 import type { OwnerReference } from "../types/v1/ObjectMeta";
+import type { ConfigMap } from "../types/v1/ConfigMap";
+import type { Secret } from "../types/v1/Secret";
 
 export interface AppState {
     Deployments: Deployment[];
@@ -19,6 +21,8 @@ export interface AppState {
     Nodes: KubeNode[];
     Jobs: Job[];
     CronJobs: CronJob[];
+    ConfigMaps: ConfigMap[];
+    Secrets: Secret[];
 }
 
 const CreateDeploymentType = "CREATE_DEPLOYMENT";
@@ -55,6 +59,10 @@ const ScaleStatefulSetType = "SCALE_STATEFULSET";
 const PatchResourceType = "PATCH_RESOURCE";
 const RollbackDeploymentType = "ROLLBACK_DEPLOYMENT";
 const ResetStateType = "RESET_STATE";
+const CreateConfigMapType = "CREATE_CONFIGMAP";
+const DeleteConfigMapType = "DELETE_CONFIGMAP";
+const CreateSecretType = "CREATE_SECRET";
+const DeleteSecretType = "DELETE_SECRET";
 
 export type ActionType =
     | typeof CreateDeploymentType
@@ -90,7 +98,11 @@ export type ActionType =
     | typeof ScaleStatefulSetType
     | typeof PatchResourceType
     | typeof RollbackDeploymentType
-    | typeof ResetStateType;
+    | typeof ResetStateType
+    | typeof CreateConfigMapType
+    | typeof DeleteConfigMapType
+    | typeof CreateSecretType
+    | typeof DeleteSecretType;
 
 export interface CreateDeploymentAction {
     type: typeof CreateDeploymentType;
@@ -314,7 +326,11 @@ export type Action =
     | { type: typeof DeleteStatefulSetType; payload: { name: string; namespace: string } }
     | { type: typeof PatchResourceType; payload: { kind: string; name: string; namespace: string; patch: Record<string, unknown> } }
     | { type: typeof RollbackDeploymentType; payload: { name: string; namespace: string; template: import("../types/v1/Pod").PodTemplateSpec } }
-    | { type: typeof ResetStateType; payload: AppState };
+    | { type: typeof ResetStateType; payload: AppState }
+    | CreateConfigMapAction
+    | { type: typeof DeleteConfigMapType; payload: { name: string; namespace: string } }
+    | CreateSecretAction
+    | { type: typeof DeleteSecretType; payload: { name: string; namespace: string } };
 
 export function deleteDeployment(name: string, namespace = "default") {
     return { type: DeleteDeploymentType as typeof DeleteDeploymentType, payload: { name, namespace } };
@@ -384,6 +400,57 @@ export function rollbackDeployment(
 
 export function resetState(state: AppState) {
     return { type: ResetStateType as typeof ResetStateType, payload: state };
+}
+
+export interface CreateConfigMapAction {
+    type: typeof CreateConfigMapType;
+    payload: {
+        name: string;
+        namespace: string;
+        data: Record<string, string>;
+        binaryData?: Record<string, string>;
+        labels?: Record<string, string>;
+        annotations?: Record<string, string>;
+        creationTimestamp: string;
+    };
+}
+
+export function createConfigMap(
+    name: string,
+    payload: Omit<CreateConfigMapAction["payload"], "name" | "namespace">,
+    namespace = "default",
+): CreateConfigMapAction {
+    return { type: CreateConfigMapType, payload: { name, namespace, ...payload } };
+}
+
+export function deleteConfigMap(name: string, namespace = "default") {
+    return { type: DeleteConfigMapType as typeof DeleteConfigMapType, payload: { name, namespace } };
+}
+
+export interface CreateSecretAction {
+    type: typeof CreateSecretType;
+    payload: {
+        name: string;
+        namespace: string;
+        secretType: string;
+        data: Record<string, string>;
+        stringData?: Record<string, string>;
+        labels?: Record<string, string>;
+        annotations?: Record<string, string>;
+        creationTimestamp: string;
+    };
+}
+
+export function createSecret(
+    name: string,
+    payload: Omit<CreateSecretAction["payload"], "name" | "namespace">,
+    namespace = "default",
+): CreateSecretAction {
+    return { type: CreateSecretType, payload: { name, namespace, ...payload } };
+}
+
+export function deleteSecret(name: string, namespace = "default") {
+    return { type: DeleteSecretType as typeof DeleteSecretType, payload: { name, namespace } };
 }
 
 export function scaleStatefulSet(name: string, replicas: number, namespace = "default") {
@@ -1254,7 +1321,70 @@ export const reducer = (state: AppState, action: Action): AppState => {
             case "node":       return { ...state, Nodes:        state.Nodes.map(r => match(r) ? apply(r) : r) };
             case "job":        return { ...state, Jobs:         state.Jobs.map(r => match(r) ? apply(r) : r) };
             case "cronjob":    return { ...state, CronJobs:     state.CronJobs.map(r => match(r) ? apply(r) : r) };
+            case "configmap": return { ...state, ConfigMaps: state.ConfigMaps.map(r => match(r) ? apply(r) : r) };
+            case "secret": return { ...state, Secrets: state.Secrets.map(r => match(r) ? apply(r) : r) };
         }
+    }
+    if (action.type === CreateConfigMapType) {
+        const { name, namespace, data, binaryData, labels, annotations, creationTimestamp } = action.payload;
+        return {
+            ...state,
+            ConfigMaps: [
+                ...state.ConfigMaps,
+                {
+                    metadata: {
+                        uid: crypto.randomUUID(),
+                        name,
+                        namespace,
+                        labels: labels ?? {},
+                        annotations: annotations ?? {},
+                        creationTimestamp,
+                    },
+                    data,
+                    ...(binaryData !== undefined ? { binaryData } : {}),
+                },
+            ],
+        };
+    }
+    if (action.type === DeleteConfigMapType) {
+        const { name, namespace } = action.payload;
+        return {
+            ...state,
+            ConfigMaps: state.ConfigMaps.filter(
+                cm => !(cm.metadata.name === name && cm.metadata.namespace === namespace),
+            ),
+        };
+    }
+    if (action.type === CreateSecretType) {
+        const { name, namespace, secretType, data, stringData, labels, annotations, creationTimestamp } = action.payload;
+        const mergedData = { ...data, ...(stringData ?? {}) };
+        return {
+            ...state,
+            Secrets: [
+                ...state.Secrets,
+                {
+                    metadata: {
+                        uid: crypto.randomUUID(),
+                        name,
+                        namespace,
+                        labels: labels ?? {},
+                        annotations: annotations ?? {},
+                        creationTimestamp,
+                    },
+                    type: secretType,
+                    data: mergedData,
+                },
+            ],
+        };
+    }
+    if (action.type === DeleteSecretType) {
+        const { name, namespace } = action.payload;
+        return {
+            ...state,
+            Secrets: state.Secrets.filter(
+                s => !(s.metadata.name === name && s.metadata.namespace === namespace),
+            ),
+        };
     }
     if (action.type === ResetStateType) {
         return action.payload;

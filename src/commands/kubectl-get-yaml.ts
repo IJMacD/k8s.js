@@ -12,6 +12,8 @@ const kindMeta: Record<string, { apiVersion: string; kind: string }> = {
     node:        { apiVersion: "v1",       kind: "Node"        },
     job:         { apiVersion: "batch/v1", kind: "Job"         },
     cronjob:     { apiVersion: "batch/v1", kind: "CronJob"     },
+    configmap: { apiVersion: "v1", kind: "ConfigMap" },
+    secret: { apiVersion: "v1", kind: "Secret" },
 };
 
 const typeAliasMap: Record<string, string> = {
@@ -25,6 +27,8 @@ const typeAliasMap: Record<string, string> = {
     nodes: "node", node: "node",
     jobs: "job", job: "job",
     cronjobs: "cronjob", cronjob: "cronjob", cj: "cronjob",
+    configmaps: "configmap", configmap: "configmap", cm: "configmap",
+    secrets: "secret", secret: "secret",
 };
 
 /** Prepend apiVersion + kind to an object and enforce real-kubectl key order */
@@ -63,6 +67,13 @@ function collect(
         case "node":        return state.Nodes.filter(n => name === undefined || n.metadata.name === name);
         case "job":         return state.Jobs.filter(j => inNs(j.metadata.namespace) && (name === undefined || j.metadata.name === name));
         case "cronjob":     return state.CronJobs.filter(c => inNs(c.metadata.namespace) && (name === undefined || c.metadata.name === name));
+        case "configmap": return state.ConfigMaps.filter(cm => inNs(cm.metadata.namespace) && (name === undefined || cm.metadata.name === name));
+        case "secret": return state.Secrets
+            .filter(s => inNs(s.metadata.namespace) && (name === undefined || s.metadata.name === name))
+            .map(s => ({
+                ...s,
+                data: Object.fromEntries(Object.entries(s.data).map(([k, v]) => [k, btoa(v)])),
+            }));
         default:            return [];
     }
 }
@@ -131,6 +142,7 @@ export async function* kubectlGetYaml(
                 pod: "pods", deployment: "deployments", replicaset: "replicasets",
                 daemonset: "daemonsets", statefulset: "statefulsets", service: "services",
                 endpoints: "endpoints", node: "nodes", job: "jobs", cronjob: "cronjobs",
+                configmap: "configmaps", secret: "secrets",
             };
             throw Error(`Error from server (NotFound): ${pluralMap[kind] ?? kind} "${name}" not found`);
         }

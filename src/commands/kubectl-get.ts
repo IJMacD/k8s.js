@@ -302,6 +302,37 @@ export async function* kubectlGet(
             ]);
             return fmtTable(headers, rows);
         }
+        if (type === "configmaps" || type === "configmap" || type === "cm") {
+            const items = state.ConfigMaps.filter(
+                cm => inNs(cm.metadata.namespace) && (name === undefined || cm.metadata.name === name) && matchSelector(cm.metadata.labels),
+            );
+            if (name && items.length === 0)
+                throw Error(`Error from server (NotFound): configmaps "${name}" not found`);
+            const headers = [...nsHdr, "NAME", "DATA", "AGE"];
+            const rows = items.map(cm => [
+                ...nsCol(cm.metadata.namespace),
+                cm.metadata.name,
+                String(Object.keys(cm.data).length),
+                ageStr(cm.metadata.creationTimestamp),
+            ]);
+            return fmtTable(headers, rows);
+        }
+        if (type === "secrets" || type === "secret") {
+            const items = state.Secrets.filter(
+                s => inNs(s.metadata.namespace) && (name === undefined || s.metadata.name === name) && matchSelector(s.metadata.labels),
+            );
+            if (name && items.length === 0)
+                throw Error(`Error from server (NotFound): secrets "${name}" not found`);
+            const headers = [...nsHdr, "NAME", "TYPE", "DATA", "AGE"];
+            const rows = items.map(s => [
+                ...nsCol(s.metadata.namespace),
+                s.metadata.name,
+                s.type,
+                String(Object.keys(s.data).length),
+                ageStr(s.metadata.creationTimestamp),
+            ]);
+            return fmtTable(headers, rows);
+        }
         if (type === "all") {
             const kinds: Array<[string, string]> = [
                 ["pods", "pod.v1"],

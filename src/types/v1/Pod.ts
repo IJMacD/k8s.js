@@ -74,10 +74,17 @@ export interface Probe {
     exec?: { command: string[] };
 }
 
+export interface EnvFromSource {
+    configMapRef?: { name: string; optional?: boolean };
+    secretRef?: { name: string; optional?: boolean };
+    prefix?: string;
+}
+
 export interface Container {
     name: string; // Name of the container
     image: string; // Docker image to be used for the container
     ports?: ContainerPort[]; // Optional list of ports to be exposed by the container
+    envFrom?: EnvFromSource[]; // Optional list of sources to populate env variables from (ConfigMap/Secret)
     env?: EnvRecord[]; // Optional list of environment variables for the container
     resources?: ResourceRequirements; // Optional resource requirements for the container
     readinessProbe?: Probe;

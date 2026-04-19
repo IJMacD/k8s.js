@@ -8,15 +8,35 @@ type PodTemplate = {
     };
 };
 
-function fmtEnvLines(env: import("../types/v1/Pod").EnvRecord[] | undefined): string[] {
+function fmtEnvFromLines(envFrom: import("../types/v1/Pod").EnvFromSource[] | undefined): string[] {
+    if (!envFrom?.length) return [];
+    return [
+        `    Environment Variables from:`,
+        ...envFrom.map(ef => {
+            const prefix = ef.prefix ? ` with prefix '${ef.prefix}'` : "";
+            if (ef.configMapRef) return `      ${ef.configMapRef.name}  ConfigMap${prefix}  Optional: ${ef.configMapRef.optional ?? false}`;
+            if (ef.secretRef)    return `      ${ef.secretRef.name}  Secret${prefix}  Optional: ${ef.secretRef.optional ?? false}`;
+            return `      <unknown>`;
+        }),
+    ];
+}
+
+function fmtEnvLines(env: import("../types/v1/Pod").EnvRecord[] | undefined, state?: AppState): string[] {
     if (!env?.length) return [`    Environment:  <none>`];
     return [
         `    Environment:`,
         ...env.map(e => {
             if (e.value != null) return `      ${e.name}:  ${e.value}`;
             if (e.valueFrom?.fieldRef) return `      ${e.name}:   (${e.valueFrom.fieldRef.apiVersion}:${e.valueFrom.fieldRef.fieldPath})`;
-            if (e.valueFrom?.configMapKeyRef) return `      ${e.name}:  <set to the key '${e.valueFrom.configMapKeyRef.key}' in configmap '${e.valueFrom.configMapKeyRef.name}'>`;
-            if (e.valueFrom?.secretKeyRef) return `      ${e.name}:  <set to the key '${e.valueFrom.secretKeyRef.key}' in secret '${e.valueFrom.secretKeyRef.name}'>`;
+            if (e.valueFrom?.configMapKeyRef) {
+                const ref = e.valueFrom.configMapKeyRef;
+                const resolved = state?.ConfigMaps
+                    .find(cm => cm.metadata.name === ref.name)?.data[ref.key];
+                return resolved !== undefined
+                    ? `      ${e.name}:  ${resolved} (configmap/${ref.name})`
+                    : `      ${e.name}:  <set to the key '${ref.key}' in configmap '${ref.name}'>  Optional: false`;
+            }
+            if (e.valueFrom?.secretKeyRef) return `      ${e.name}:  <set to the key '${e.valueFrom.secretKeyRef.key}' in secret '${e.valueFrom.secretKeyRef.name}'>  Optional: false`;
             return `      ${e.name}:  <set>`;
         }),
     ];
@@ -32,6 +52,7 @@ function podTemplateLines(template: PodTemplate): string[] {
                 `   ${c.name}:`,
                 `    Image:  ${c.image}`,
                 `    Port:   <none>`,
+                ...fmtEnvFromLines(c.envFrom),
                 ...fmtEnvLines(c.env),
             ]),
         ]
@@ -45,6 +66,7 @@ function podTemplateLines(template: PodTemplate): string[] {
             `   ${c.name}:`,
             `    Image:       ${c.image}`,
             `    Port:        ${c.ports?.length ? c.ports.map(fmtPort).join(", ") : "<none>"}`,
+            ...fmtEnvFromLines(c.envFrom),
             ...fmtEnvLines(c.env),
         ]),
     ];
@@ -334,7 +356,7 @@ export async function* kubectlDescribe(
         const containerReady = pod.status.conditions?.find(c => c.type === "ContainersReady")?.status === "True";
 
         const containerStateLines = (
-            c: { name: string; image: string; ports?: import("../types/v1/Pod").ContainerPort[]; env?: import("../types/v1/Pod").EnvRecord[]; readinessProbe?: import("../types/v1/Pod").Probe; livenessProbe?: import("../types/v1/Pod").Probe; startupProbe?: import("../types/v1/Pod").Probe },
+            c: { name: string; image: string; ports?: import("../types/v1/Pod").ContainerPort[]; envFrom?: import("../types/v1/Pod").EnvFromSource[]; env?: import("../types/v1/Pod").EnvRecord[]; readinessProbe?: import("../types/v1/Pod").Probe; livenessProbe?: import("../types/v1/Pod").Probe; startupProbe?: import("../types/v1/Pod").Probe },
             cStatus: import("../types/v1/Pod").ContainerStatus | undefined,
         ): string[] => {
             const fmtPort = (p: import("../types/v1/Pod").ContainerPort) =>
@@ -360,7 +382,8 @@ export async function* kubectlDescribe(
                 `    Image:          ${c.image}`,
                 `    Port:           ${c.ports?.length ? c.ports.map(fmtPort).join(", ") : "<none>"}`,
                 `    Host Port:      0/TCP`,
-                ...fmtEnvLines(c.env),
+                ...fmtEnvFromLines(c.envFrom),
+                ...fmtEnvLines(c.env, state),
                 ...(c.livenessProbe  ? [`    Liveness:       ${fmtProbe(c.livenessProbe)}`]  : []),
                 ...(c.readinessProbe ? [`    Readiness:      ${fmtProbe(c.readinessProbe)}`] : []),
                 ...(c.startupProbe   ? [`    Startup:        ${fmtProbe(c.startupProbe)}`]   : []),
@@ -442,7 +465,8 @@ export async function* kubectlDescribe(
                 `   ${ic.name}:`,
                 `    Image:          ${ic.image}`,
                 `    Port:           <none>`,
-                ...fmtEnvLines(ic.env),
+                ...fmtEnvFromLines(ic.envFrom),
+                ...fmtEnvLines(ic.env, state),
             ];
             if (icStatus?.state.terminated) {
                 return [...base,
@@ -623,6 +647,45 @@ export async function* kubectlDescribe(
             ...nodePods.map(p => `  ${p.metadata.namespace.padEnd(12)} ${p.metadata.name.padEnd(33)} ${p.status.phase}`),
             ``,
             `Events:  <none>`,
+        ];
+        yield lines.join("\n"); return;
+    }
+
+    if (resourceArg.startsWith("configmap/") || resourceArg.startsWith("cm/") || args[1] === "configmap" || args[1] === "cm") {
+        const name = resolveName();
+        if (!name) throw Error("kubectl describe configmap: missing name");
+        const cm = state.ConfigMaps.find(c => c.metadata.name === name && c.metadata.namespace === namespace);
+        if (!cm) throw Error(`Error from server (NotFound): configmaps "${name}" not found`);
+        const lines = [
+            `Name:         ${cm.metadata.name}`,
+            `Namespace:    ${cm.metadata.namespace}`,
+            `Labels:       ${Object.entries(cm.metadata.labels).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
+            `Annotations:  ${Object.entries(cm.metadata.annotations).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
+            ``,
+            `Data`,
+            `====`,
+            ...Object.entries(cm.data).flatMap(([k, v]) => [`${k}:`, `----`, v, ``]),
+            `Events:  <none>`,
+        ];
+        yield lines.join("\n"); return;
+    }
+
+    if (resourceArg.startsWith("secret/") || args[1] === "secret") {
+        const name = resolveName();
+        if (!name) throw Error("kubectl describe secret: missing name");
+        const secret = state.Secrets.find(s => s.metadata.name === name && s.metadata.namespace === namespace);
+        if (!secret) throw Error(`Error from server (NotFound): secrets "${name}" not found`);
+        const lines = [
+            `Name:         ${secret.metadata.name}`,
+            `Namespace:    ${secret.metadata.namespace}`,
+            `Labels:       ${Object.entries(secret.metadata.labels).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
+            `Annotations:  ${Object.entries(secret.metadata.annotations).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
+            ``,
+            `Type:  ${secret.type}`,
+            ``,
+            `Data`,
+            `====`,
+            ...Object.entries(secret.data).map(([k, v]) => `${k}:  ${v.length} bytes`),
         ];
         yield lines.join("\n"); return;
     }

@@ -57,6 +57,8 @@ function makeInitialState(): AppState {
     ],
     Jobs: [],
     CronJobs: [],
+    ConfigMaps: [],
+    Secrets: [],
   };
 }
 
@@ -64,7 +66,7 @@ function App() {
   const [store, dispatch] = useReducer(reducer, STORAGE_KEY, (key): AppState => {
     try {
       const stored = localStorage.getItem(key);
-      if (stored !== null) return JSON.parse(stored) as AppState;
+      if (stored !== null) return { ...makeInitialState(), ...JSON.parse(stored) as AppState };
     } catch { /* ignore — fall back to fresh state */ }
     return makeInitialState();
   });
@@ -160,6 +162,8 @@ function App() {
           Nodes={store.Nodes}
           Jobs={store.Jobs}
           CronJobs={store.CronJobs}
+          ConfigMaps={store.ConfigMaps}
+          Secrets={store.Secrets}
         />
       </div>
       {/* Bottom panel — always mounted to preserve Console/Browser state */}

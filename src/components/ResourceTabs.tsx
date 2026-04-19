@@ -133,13 +133,13 @@ function AgeCell({ timestamp }: { timestamp: string }) {
   return <td>{timestamp ? age(timestamp) : ''}</td>;
 }
 
-type Tab = 'Deployments' | 'DaemonSets' | 'StatefulSets' | 'ReplicaSets' | 'Pods' | 'Services' | 'Nodes' | 'Jobs' | 'CronJobs';
+type Tab = 'Deployments' | 'DaemonSets' | 'StatefulSets' | 'ReplicaSets' | 'Pods' | 'Services' | 'Nodes' | 'Jobs' | 'CronJobs' | 'ConfigMaps' | 'Secrets';
 
-const TABS: Tab[] = ['Deployments', 'DaemonSets', 'StatefulSets', 'ReplicaSets', 'Pods', 'Services', 'Nodes', 'Jobs', 'CronJobs'];
+const TABS: Tab[] = ['Deployments', 'DaemonSets', 'StatefulSets', 'ReplicaSets', 'Pods', 'Services', 'Nodes', 'Jobs', 'CronJobs', 'ConfigMaps', 'Secrets'];
 
-type Props = Pick<AppState, 'Deployments' | 'DaemonSets' | 'StatefulSets' | 'ReplicaSets' | 'Pods' | 'Services' | 'Endpoints' | 'Nodes' | 'Jobs' | 'CronJobs'>;
+type Props = Pick<AppState, 'Deployments' | 'DaemonSets' | 'StatefulSets' | 'ReplicaSets' | 'Pods' | 'Services' | 'Endpoints' | 'Nodes' | 'Jobs' | 'CronJobs' | 'ConfigMaps' | 'Secrets'>;
 
-export function ResourceTabs({ Deployments, DaemonSets, StatefulSets, ReplicaSets, Pods, Services, Endpoints, Nodes, Jobs, CronJobs }: Props) {
+export function ResourceTabs({ Deployments, DaemonSets, StatefulSets, ReplicaSets, Pods, Services, Endpoints, Nodes, Jobs, CronJobs, ConfigMaps, Secrets }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('Deployments');
 
   return (
@@ -457,6 +457,52 @@ export function ResourceTabs({ Deployments, DaemonSets, StatefulSets, ReplicaSet
                   </tr>
                 );
               })}
+            </tbody>
+          </table>
+        )}
+        {activeTab === 'ConfigMaps' && (
+          <table className="resource-tabs__table">
+            <thead>
+              <tr>
+                <th>Namespace</th>
+                <th>Name</th>
+                <th>Keys</th>
+                <th>Age</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ConfigMaps.map(cm => (
+                <tr key={`${cm.metadata.namespace}/${cm.metadata.name}`}>
+                  <td>{cm.metadata.namespace}</td>
+                  <td>{cm.metadata.name}</td>
+                  <td>{Object.keys(cm.data).length}</td>
+                  <AgeCell timestamp={cm.metadata.creationTimestamp} />
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {activeTab === 'Secrets' && (
+          <table className="resource-tabs__table">
+            <thead>
+              <tr>
+                <th>Namespace</th>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Keys</th>
+                <th>Age</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Secrets.map(s => (
+                <tr key={`${s.metadata.namespace}/${s.metadata.name}`}>
+                  <td>{s.metadata.namespace}</td>
+                  <td>{s.metadata.name}</td>
+                  <td>{s.type}</td>
+                  <td>{Object.keys(s.data).length}</td>
+                  <AgeCell timestamp={s.metadata.creationTimestamp} />
+                </tr>
+              ))}
             </tbody>
           </table>
         )}

@@ -1,10 +1,12 @@
 import type { ActionDispatch } from "react";
 import {
+    createConfigMap,
     createCronJob,
     createDaemonSet,
     createDeployment,
     createJob,
     createPod,
+    createSecret,
     createStatefulSet,
     type Action,
     type AppState,
@@ -49,7 +51,10 @@ export async function* kubectlCreate(
             throw Error("Expecting --image");
         }
     }
-    if (args[0] === "create" && args[1] === "job") {
+    if (args[0] !== "create") {
+        throw Error(`Unsupported kubectl create command: ${args.join(" ")}`);
+    }
+    if (args[1] === "job") {
         const name = args[2];
         if (!name) throw Error("kubectl create job: missing NAME");
 
@@ -96,7 +101,7 @@ export async function* kubectlCreate(
         }, namespace));
         yield `job.batch/${name} created`; return;
     }
-    if (args[0] === "create" && args[1] === "cronjob") {
+    if (args[1] === "cronjob") {
         const name = args[2];
         if (!name) throw Error("kubectl create cronjob: missing NAME");
 
@@ -124,7 +129,7 @@ export async function* kubectlCreate(
         }, namespace));
         yield `cronjob.batch/${name} created`; return;
     }
-    if (args[0] === "create" && args[1] === "daemonset") {
+    if (args[1] === "daemonset") {
         const name = args[2];
         if (!name) throw Error("kubectl create daemonset: missing NAME");
 
@@ -142,7 +147,7 @@ export async function* kubectlCreate(
         }, namespace));
         yield `daemonset.apps/${name} created`; return;
     }
-    if (args[0] === "create" && args[1] === "statefulset") {
+    if (args[1] === "statefulset") {
         const name = args[2];
         if (!name) throw Error("kubectl create statefulset: missing NAME");
 
@@ -164,7 +169,49 @@ export async function* kubectlCreate(
         }, namespace));
         yield `statefulset.apps/${name} created`; return;
     }
-    if (args[0] === "create" && args[1] === "deployment") {
+    if (args[1] === "configmap") {
+        const name = args[2];
+        if (!name) throw Error("kubectl create configmap: missing NAME");
+        const literalArgs: string[] = [];
+        for (let i = 0; i < args.length; i++) {
+            if (args[i].startsWith("--from-literal=")) literalArgs.push(args[i].slice("--from-literal=".length));
+            else if (args[i] === "--from-literal" && args[i + 1]) literalArgs.push(args[++i]);
+        }
+        const data: Record<string, string> = {};
+        for (const kv of literalArgs) {
+            const eq = kv.indexOf("=");
+            if (eq < 0) throw Error(`--from-literal: invalid format "${kv}" — must be KEY=VALUE`);
+            data[kv.slice(0, eq)] = kv.slice(eq + 1);
+        }
+        if (state.ConfigMaps.some(cm => cm.metadata.name === name && cm.metadata.namespace === namespace))
+            throw Error(`Error from server (AlreadyExists): configmaps "${name}" already exists`);
+        dispatch(createConfigMap(name, { data, creationTimestamp: new Date().toISOString() }, namespace));
+        yield `configmap/${name} created`; return;
+    }
+    if (args[1] === "secret") {
+        if (args[2] === "generic") {
+            const name = args[3];
+            if (!name) throw Error("kubectl create secret generic: missing NAME");
+            const literalArgs: string[] = [];
+            for (let i = 0; i < args.length; i++) {
+                if (args[i].startsWith("--from-literal=")) literalArgs.push(args[i].slice("--from-literal=".length));
+                else if (args[i] === "--from-literal" && args[i + 1]) literalArgs.push(args[++i]);
+            }
+            const data: Record<string, string> = {};
+            for (const kv of literalArgs) {
+                const eq = kv.indexOf("=");
+                if (eq < 0) throw Error(`--from-literal: invalid format "${kv}" — must be KEY=VALUE`);
+                data[kv.slice(0, eq)] = kv.slice(eq + 1);
+            }
+            if (state.Secrets.some(s => s.metadata.name === name && s.metadata.namespace === namespace))
+                throw Error(`Error from server (AlreadyExists): secrets "${name}" already exists`);
+            dispatch(createSecret(name, { secretType: "Opaque", data, creationTimestamp: new Date().toISOString() }, namespace));
+            yield `secret/${name} created`; return;
+        } else {
+            throw Error(`kubectl create secret: unsupported secret type "${args[2]}" (only "generic" is supported)`);
+        }
+    }
+    if (args[1] === "deployment") {
         const name = args[2];
         if (!name) throw Error("kubectl create deployment: missing NAME");
 
