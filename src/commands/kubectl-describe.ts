@@ -356,7 +356,7 @@ export async function* kubectlDescribe(
         const containerReady = pod.status.conditions?.find(c => c.type === "ContainersReady")?.status === "True";
 
         const containerStateLines = (
-            c: { name: string; image: string; ports?: import("../types/v1/Pod").ContainerPort[]; envFrom?: import("../types/v1/Pod").EnvFromSource[]; env?: import("../types/v1/Pod").EnvRecord[]; readinessProbe?: import("../types/v1/Pod").Probe; livenessProbe?: import("../types/v1/Pod").Probe; startupProbe?: import("../types/v1/Pod").Probe },
+            c: import("../types/v1/Pod").Container,
             cStatus: import("../types/v1/Pod").ContainerStatus | undefined,
         ): string[] => {
             const fmtPort = (p: import("../types/v1/Pod").ContainerPort) =>
@@ -384,6 +384,10 @@ export async function* kubectlDescribe(
                 `    Host Port:      0/TCP`,
                 ...fmtEnvFromLines(c.envFrom),
                 ...fmtEnvLines(c.env, state),
+                ...(c.volumeMounts?.length
+                    ? [`    Mounts:`, ...c.volumeMounts.map(vm => `      ${vm.mountPath} from ${vm.name} (${vm.readOnly ? "ro" : "rw"})`)]
+                    : [`    Mounts:         <none>`]
+                ),
                 ...(c.livenessProbe  ? [`    Liveness:       ${fmtProbe(c.livenessProbe)}`]  : []),
                 ...(c.readinessProbe ? [`    Readiness:      ${fmtProbe(c.readinessProbe)}`] : []),
                 ...(c.startupProbe   ? [`    Startup:        ${fmtProbe(c.startupProbe)}`]   : []),
@@ -567,6 +571,32 @@ export async function* kubectlDescribe(
             `Node-Selectors:   <none>`,
             `Tolerations:      node.kubernetes.io/not-ready:NoExecute op=Exists for 300s`,
             ``,
+            `Volumes:`,
+            ...(pod.spec.volumes?.length
+                ? pod.spec.volumes.flatMap(v => {
+                    const lines: string[] = [`  ${v.name}:`];
+                    if (v.persistentVolumeClaim) {
+                        lines.push(`    Type:    PersistentVolumeClaim (a reference to a PersistentVolumeClaim in the same namespace)`);
+                        lines.push(`    ClaimName:  ${v.persistentVolumeClaim.claimName}`);
+                        lines.push(`    ReadOnly:   ${v.persistentVolumeClaim.readOnly ?? false}`);
+                    } else if (v.configMap) {
+                        lines.push(`    Type:       ConfigMap (a volume populated by a ConfigMap)`);
+                        lines.push(`    Name:       ${v.configMap.name}`);
+                    } else if (v.secret) {
+                        lines.push(`    Type:       Secret (a volume populated by a Secret)`);
+                        lines.push(`    SecretName: ${v.secret.secretName}`);
+                    } else if (v.emptyDir !== undefined) {
+                        lines.push(`    Type:    EmptyDir (a temporary directory that shares a pod's lifetime)`);
+                        lines.push(`    Medium:  ${v.emptyDir.medium ?? ""}`);
+                    } else if (v.hostPath) {
+                        lines.push(`    Type:  HostPath (bare host directory volume)`);
+                        lines.push(`    Path:  ${v.hostPath.path}`);
+                    }
+                    return lines;
+                  })
+                : [`  <none>`]
+            ),
+            ``,
             ...podEvents(),
         ];
         yield lines.join("\n"); return;
@@ -686,6 +716,84 @@ export async function* kubectlDescribe(
             `Data`,
             `====`,
             ...Object.entries(secret.data).map(([k, v]) => `${k}:  ${v.length} bytes`),
+        ];
+        yield lines.join("\n"); return;
+    }
+
+    if (resourceArg.startsWith("persistentvolume/") || resourceArg.startsWith("pv/") || args[1] === "persistentvolume" || args[1] === "pv") {
+        const name = resolveName();
+        if (!name) throw Error("kubectl describe persistentvolume: missing name");
+        const pv = state.PersistentVolumes.find(p => p.metadata.name === name);
+        if (!pv) throw Error(`Error from server (NotFound): persistentvolumes "${name}" not found`);
+        const claimRef = pv.spec.claimRef
+            ? `${pv.spec.claimRef.namespace}/${pv.spec.claimRef.name}`
+            : "<none>";
+        const fmtMode = (m: string) => m === "ReadWriteOnce" ? "RWO" : m === "ReadOnlyMany" ? "ROX" : m === "ReadWriteMany" ? "RWX" : m === "ReadWriteOncePod" ? "RWOP" : m;
+        const lines = [
+            `Name:            ${pv.metadata.name}`,
+            `Labels:          ${Object.entries(pv.metadata.labels ?? {}).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
+            `Annotations:     ${Object.entries(pv.metadata.annotations ?? {}).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
+            `Finalizers:      []`,
+            `StorageClass:    ${pv.spec.storageClassName ?? ""}`,
+            `Status:          ${pv.status.phase}`,
+            `Claim:           ${claimRef}`,
+            `Reclaim Policy:  ${pv.spec.persistentVolumeReclaimPolicy}`,
+            `Access Modes:    ${pv.spec.accessModes.map(fmtMode).join(",")}`,
+            `VolumeMode:      ${pv.spec.volumeMode ?? "Filesystem"}`,
+            `Capacity:        ${pv.spec.capacity.storage}`,
+            ...(pv.spec.nodeAffinity ? [
+                `Node Affinity:`,
+                `  Required Terms:`,
+                ...(pv.spec.nodeAffinity.required?.nodeSelectorTerms ?? []).flatMap(term =>
+                    (term.matchExpressions ?? []).map(e =>
+                        `    ${e.key} ${e.operator.toLowerCase()} (${(e.values ?? []).join(",")})`
+                    )
+                ),
+            ] : [`Node Affinity:   <none>`]),
+            `Message:         ${pv.status.message ?? ""}`,
+            `Source:`,
+            ...(pv.spec.hostPath ? [
+                `    Type:  HostPath`,
+                `    Path:  ${pv.spec.hostPath.path}`,
+            ] : pv.spec.nfs ? [
+                `    Type:    NFS`,
+                `    Server:  ${pv.spec.nfs.server}`,
+                `    Path:    ${pv.spec.nfs.path}`,
+            ] : pv.spec.local ? [
+                `    Type:  Local`,
+                `    Path:  ${pv.spec.local.path}`,
+            ] : [
+                `    Type:  <unknown>`,
+            ]),
+            `Events:  <none>`,
+        ];
+        yield lines.join("\n"); return;
+    }
+
+    if (resourceArg.startsWith("persistentvolumeclaim/") || resourceArg.startsWith("pvc/") || args[1] === "persistentvolumeclaim" || args[1] === "pvc") {
+        const name = resolveName();
+        if (!name) throw Error("kubectl describe persistentvolumeclaim: missing name");
+        const pvc = state.PersistentVolumeClaims.find(c => c.metadata.name === name && c.metadata.namespace === namespace);
+        if (!pvc) throw Error(`Error from server (NotFound): persistentvolumeclaims "${name}" not found`);
+        const fmtMode = (m: string) => m === "ReadWriteOnce" ? "RWO" : m === "ReadOnlyMany" ? "ROX" : m === "ReadWriteMany" ? "RWX" : m === "ReadWriteOncePod" ? "RWOP" : m;
+        const usedBy = state.Pods.filter(p =>
+            p.metadata.namespace === pvc.metadata.namespace &&
+            (p.spec.volumes ?? []).some(v => v.persistentVolumeClaim?.claimName === pvc.metadata.name)
+        ).map(p => p.metadata.name);
+        const lines = [
+            `Name:          ${pvc.metadata.name}`,
+            `Namespace:     ${pvc.metadata.namespace}`,
+            `StorageClass:  ${pvc.spec.storageClassName ?? ""}`,
+            `Status:        ${pvc.status.phase}`,
+            `Volume:        ${pvc.status.boundVolume ?? ""}`,
+            `Labels:        ${Object.entries(pvc.metadata.labels ?? {}).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
+            `Annotations:   ${Object.entries(pvc.metadata.annotations ?? {}).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
+            `Finalizers:    []`,
+            `Capacity:      ${pvc.status.capacity?.storage ?? ""}`,
+            `Access Modes:  ${(pvc.status.accessModes ?? pvc.spec.accessModes).map(fmtMode).join(",")}`,
+            `VolumeMode:    ${pvc.spec.volumeMode ?? "Filesystem"}`,
+            `Used By:       ${usedBy.length ? usedBy.join(", ") : "<none>"}`,
+            `Events:        <none>`,
         ];
         yield lines.join("\n"); return;
     }

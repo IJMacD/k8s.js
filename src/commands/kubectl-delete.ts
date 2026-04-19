@@ -5,6 +5,8 @@ import {
     deleteDaemonSet,
     deleteDeployment,
     deleteJob,
+    deletePersistentVolume,
+    deletePersistentVolumeClaim,
     deletePod,
     deleteReplicaSet,
     deleteSecret,
@@ -56,6 +58,8 @@ export async function* kubectlDelete(
             case "statefulset": case "statefulsets": case "sts": return "statefulset";
             case "configmap": case "configmaps": case "cm": return "configmap";
             case "secret": case "secrets": return "secret";
+            case "persistentvolume": case "persistentvolumes": case "pv": return "persistentvolume";
+            case "persistentvolumeclaim": case "persistentvolumeclaims": case "pvc": return "persistentvolumeclaim";
             default: return null;
         }
     };
@@ -77,6 +81,8 @@ export async function* kubectlDelete(
             case "statefulset": names = state.StatefulSets.filter(sts => sts.metadata.namespace === namespace).map(sts => sts.metadata.name); break;
             case "configmap": names = state.ConfigMaps.filter(cm => cm.metadata.namespace === namespace).map(cm => cm.metadata.name); break;
             case "secret": names = state.Secrets.filter(s => s.metadata.namespace === namespace).map(s => s.metadata.name); break;
+            case "persistentvolume": names = state.PersistentVolumes.map(pv => pv.metadata.name); break;
+            case "persistentvolumeclaim": names = state.PersistentVolumeClaims.filter(pvc => pvc.metadata.namespace === namespace).map(pvc => pvc.metadata.name); break;
         }
     }
 
@@ -160,6 +166,20 @@ export async function* kubectlDelete(
                 if (!sec) throw Error(`Error from server (NotFound): secrets "${name}" not found`);
                 dispatch(deleteSecret(name, namespace));
                 lines.push(`secret "${name}" deleted`);
+                break;
+            }
+            case "persistentvolume": {
+                const pv = state.PersistentVolumes.find(p => p.metadata.name === name);
+                if (!pv) throw Error(`Error from server (NotFound): persistentvolumes "${name}" not found`);
+                dispatch(deletePersistentVolume(name));
+                lines.push(`persistentvolume "${name}" deleted`);
+                break;
+            }
+            case "persistentvolumeclaim": {
+                const pvc = state.PersistentVolumeClaims.find(c => c.metadata.name === name && c.metadata.namespace === namespace);
+                if (!pvc) throw Error(`Error from server (NotFound): persistentvolumeclaims "${name}" not found`);
+                dispatch(deletePersistentVolumeClaim(name, namespace));
+                lines.push(`persistentvolumeclaim "${name}" deleted`);
                 break;
             }
         }

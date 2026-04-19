@@ -14,6 +14,8 @@ const kindMeta: Record<string, { apiVersion: string; kind: string }> = {
     cronjob:     { apiVersion: "batch/v1", kind: "CronJob"     },
     configmap: { apiVersion: "v1", kind: "ConfigMap" },
     secret: { apiVersion: "v1", kind: "Secret" },
+    persistentvolume: { apiVersion: "v1", kind: "PersistentVolume" },
+    persistentvolumeclaim: { apiVersion: "v1", kind: "PersistentVolumeClaim" },
 };
 
 const typeAliasMap: Record<string, string> = {
@@ -29,6 +31,8 @@ const typeAliasMap: Record<string, string> = {
     cronjobs: "cronjob", cronjob: "cronjob", cj: "cronjob",
     configmaps: "configmap", configmap: "configmap", cm: "configmap",
     secrets: "secret", secret: "secret",
+    persistentvolumes: "persistentvolume", persistentvolume: "persistentvolume", pv: "persistentvolume",
+    persistentvolumeclaims: "persistentvolumeclaim", persistentvolumeclaim: "persistentvolumeclaim", pvc: "persistentvolumeclaim",
 };
 
 /** Prepend apiVersion + kind to an object and enforce real-kubectl key order */
@@ -74,6 +78,8 @@ function collect(
                 ...s,
                 data: Object.fromEntries(Object.entries(s.data).map(([k, v]) => [k, btoa(v)])),
             }));
+        case "persistentvolume": return state.PersistentVolumes.filter(pv => name === undefined || pv.metadata.name === name);
+        case "persistentvolumeclaim": return state.PersistentVolumeClaims.filter(pvc => inNs(pvc.metadata.namespace) && (name === undefined || pvc.metadata.name === name));
         default:            return [];
     }
 }
@@ -143,6 +149,7 @@ export async function* kubectlGetYaml(
                 daemonset: "daemonsets", statefulset: "statefulsets", service: "services",
                 endpoints: "endpoints", node: "nodes", job: "jobs", cronjob: "cronjobs",
                 configmap: "configmaps", secret: "secrets",
+                persistentvolume: "persistentvolumes", persistentvolumeclaim: "persistentvolumeclaims",
             };
             throw Error(`Error from server (NotFound): ${pluralMap[kind] ?? kind} "${name}" not found`);
         }

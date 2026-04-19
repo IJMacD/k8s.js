@@ -333,6 +333,62 @@ export async function* kubectlGet(
             ]);
             return fmtTable(headers, rows);
         }
+        if (type === "persistentvolumes" || type === "persistentvolume" || type === "pv") {
+            // PVs are cluster-scoped — ignore namespace and --all-namespaces
+            const items = state.PersistentVolumes.filter(
+                pv => (name === undefined || pv.metadata.name === name) && matchSelector(pv.metadata.labels),
+            );
+            if (name && items.length === 0)
+                throw Error(`Error from server (NotFound): persistentvolumes "${name}" not found`);
+            const headers = ["NAME", "CAPACITY", "ACCESS MODES", "RECLAIM POLICY", "STATUS", "CLAIM", "STORAGECLASS", "AGE"];
+            const rows = items.map(pv => {
+                const claim = pv.spec.claimRef
+                    ? `${pv.spec.claimRef.namespace}/${pv.spec.claimRef.name}`
+                    : "";
+                return [
+                    pv.metadata.name,
+                    pv.spec.capacity.storage,
+                    pv.spec.accessModes.map(m => {
+                        if (m === "ReadWriteOnce") return "RWO";
+                        if (m === "ReadOnlyMany") return "ROX";
+                        if (m === "ReadWriteMany") return "RWX";
+                        if (m === "ReadWriteOncePod") return "RWOP";
+                        return m;
+                    }).join(","),
+                    pv.spec.persistentVolumeReclaimPolicy,
+                    pv.status.phase,
+                    claim,
+                    pv.spec.storageClassName ?? "",
+                    ageStr(pv.metadata.creationTimestamp),
+                ];
+            });
+            return fmtTable(headers, rows);
+        }
+        if (type === "persistentvolumeclaims" || type === "persistentvolumeclaim" || type === "pvc") {
+            const items = state.PersistentVolumeClaims.filter(
+                pvc => inNs(pvc.metadata.namespace) && (name === undefined || pvc.metadata.name === name) && matchSelector(pvc.metadata.labels),
+            );
+            if (name && items.length === 0)
+                throw Error(`Error from server (NotFound): persistentvolumeclaims "${name}" not found`);
+            const headers = [...nsHdr, "NAME", "STATUS", "VOLUME", "CAPACITY", "ACCESS MODES", "STORAGECLASS", "AGE"];
+            const rows = items.map(pvc => [
+                ...nsCol(pvc.metadata.namespace),
+                pvc.metadata.name,
+                pvc.status.phase,
+                pvc.status.boundVolume ?? "",
+                pvc.status.capacity?.storage ?? "",
+                (pvc.status.accessModes ?? pvc.spec.accessModes).map(m => {
+                    if (m === "ReadWriteOnce") return "RWO";
+                    if (m === "ReadOnlyMany") return "ROX";
+                    if (m === "ReadWriteMany") return "RWX";
+                    if (m === "ReadWriteOncePod") return "RWOP";
+                    return m;
+                }).join(","),
+                pvc.spec.storageClassName ?? "",
+                ageStr(pvc.metadata.creationTimestamp),
+            ]);
+            return fmtTable(headers, rows);
+        }
         if (type === "all") {
             const kinds: Array<[string, string]> = [
                 ["pods", "pod.v1"],

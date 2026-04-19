@@ -4,6 +4,7 @@ import type { AppState, Action } from "../store/store";
 import { bindPodToNode } from "../store/store";
 import type { Pod } from "../types/v1/Pod";
 import type { KubeNode } from "../types/v1/Node";
+import type { NodeSelectorRequirement } from "../types/v1/PersistentVolume";
 
 const SCHEDULE_DELAY_MS = 500;
 
@@ -73,6 +74,20 @@ function nodeRemainingMemory(node: KubeNode, allPods: Pod[]): number {
 }
 
 /**
+ * Evaluate a single nodeAffinity matchExpression against a node's labels.
+ * Exported for testability.
+ */
+export function matchNodeSelectorExpr(expr: NodeSelectorRequirement, labels: Record<string, string>): boolean {
+    const val = labels[expr.key];
+    switch (expr.operator) {
+        case "In":          return expr.values !== undefined && expr.values.includes(val ?? "");
+        case "NotIn":       return expr.values !== undefined && !expr.values.includes(val ?? "");
+        case "Exists":      return val !== undefined;
+        case "DoesNotExist": return val === undefined;
+    }
+}
+
+/**
  * Simulates the Kubernetes scheduler.
  * Watches for Pending pods with no nodeName and binds them to a Ready,
  * schedulable node using a least-loaded (fewest pods) strategy.
@@ -81,7 +96,7 @@ export function useScheduler(
     state: AppState,
     dispatch: ActionDispatch<[action: Action]>,
 ) {
-    const { Pods, Nodes } = state;
+    const { Pods, Nodes, PersistentVolumeClaims, PersistentVolumes } = state;
     const scheduledRef = useRef<Set<string>>(new Set());
     const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
@@ -111,10 +126,87 @@ export function useScheduler(
                 )
                 : readyNodes;
 
+            // ---------------------------------------------------------------
+            // PVC constraint 1: All PVC volumes must be already Bound.
+            // If any referenced PVC is still Pending/Lost, skip this pod.
+            // ---------------------------------------------------------------
+            const pvClaimNames = (pod.spec.volumes ?? []).flatMap(v =>
+                v.persistentVolumeClaim ? [v.persistentVolumeClaim.claimName] : []
+            );
+            const pvcRefs = pvClaimNames.map(cn =>
+                PersistentVolumeClaims.find(
+                    c => c.metadata.name === cn && c.metadata.namespace === pod.metadata.namespace
+                )
+            );
+            if (pvcRefs.some(c => !c || c.status.phase !== "Bound")) continue;
+
+            // ---------------------------------------------------------------
+            // PVC constraint 2: nodeAffinity from bound PVs must be satisfied.
+            // ---------------------------------------------------------------
+            let affinityFiltered = selectorFiltered;
+            for (const pvc of pvcRefs as NonNullable<typeof pvcRefs[number]>[]) {
+                const pvName = pvc.status.boundVolume;
+                const pv = pvName ? PersistentVolumes.find(p => p.metadata.name === pvName) : undefined;
+                const terms = pv?.spec.nodeAffinity?.required?.nodeSelectorTerms;
+                if (!terms || terms.length === 0) continue;
+                // Terms are OR'd; within a term matchExpressions are AND'd
+                affinityFiltered = affinityFiltered.filter(node =>
+                    terms.some(term =>
+                        (term.matchExpressions ?? []).every(expr =>
+                            matchNodeSelectorExpr(expr, node.metadata.labels)
+                        ) &&
+                        (term.matchFields ?? []).every(expr =>
+                            matchNodeSelectorExpr(expr, { metadata: node.metadata.name } as unknown as Record<string, string>)
+                        )
+                    )
+                );
+            }
+
+            // ---------------------------------------------------------------
+            // PVC constraint 3: RWO / RWOP access-mode pinning.
+            //   RWO  → at most one node may have the volume mounted at once;
+            //          if another Running pod already uses this PVC on node X,
+            //          constrain scheduling to node X only.
+            //   RWOP → the volume can only be used by a single pod at a time;
+            //          if any Running pod already uses this PVC, no node is eligible.
+            // ---------------------------------------------------------------
+            for (const pvc of pvcRefs as NonNullable<typeof pvcRefs[number]>[]) {
+                const modes = pvc.spec.accessModes;
+                if (modes.includes("ReadWriteOncePod")) {
+                    // Check if any running pod (not this pod) uses this PVC
+                    const inUse = Pods.some(p =>
+                        p.metadata.uid !== pod.metadata.uid &&
+                        p.status.phase === "Running" &&
+                        (p.spec.volumes ?? []).some(v =>
+                            v.persistentVolumeClaim?.claimName === pvc.metadata.name &&
+                            p.metadata.namespace === pvc.metadata.namespace
+                        )
+                    );
+                    if (inUse) {
+                        affinityFiltered = [];
+                        break;
+                    }
+                } else if (modes.includes("ReadWriteOnce")) {
+                    // Find the node where this PVC is already actively mounted
+                    const pinnedNode = Pods.find(p =>
+                        p.metadata.uid !== pod.metadata.uid &&
+                        p.status.phase === "Running" &&
+                        p.spec.nodeName &&
+                        (p.spec.volumes ?? []).some(v =>
+                            v.persistentVolumeClaim?.claimName === pvc.metadata.name &&
+                            p.metadata.namespace === pvc.metadata.namespace
+                        )
+                    )?.spec.nodeName;
+                    if (pinnedNode) {
+                        affinityFiltered = affinityFiltered.filter(n => n.metadata.name === pinnedNode);
+                    }
+                }
+            }
+
             // Filter by resource requests: exclude nodes that cannot satisfy the pod's requests
             const reqCPU = podTotalCPU(pod);
             const reqMemory = podTotalMemory(pod);
-            const eligibleNodes = selectorFiltered.filter(n =>
+            const eligibleNodes = affinityFiltered.filter(n =>
                 nodeRemainingCPU(n, Pods) >= reqCPU &&
                 nodeRemainingMemory(n, Pods) >= reqMemory
             );
@@ -143,7 +235,7 @@ export function useScheduler(
                 dispatch(bindPodToNode(pod.metadata.name, pod.metadata.namespace, chosen.metadata.name));
             }, SCHEDULE_DELAY_MS));
         }
-    }, [Pods, Nodes, dispatch]);
+    }, [Pods, Nodes, PersistentVolumeClaims, PersistentVolumes, dispatch]);
 
     useEffect(() => {
         const timers = timersRef.current;

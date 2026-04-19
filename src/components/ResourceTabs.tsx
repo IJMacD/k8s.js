@@ -133,13 +133,13 @@ function AgeCell({ timestamp }: { timestamp: string }) {
   return <td>{timestamp ? age(timestamp) : ''}</td>;
 }
 
-type Tab = 'Deployments' | 'DaemonSets' | 'StatefulSets' | 'ReplicaSets' | 'Pods' | 'Services' | 'Nodes' | 'Jobs' | 'CronJobs' | 'ConfigMaps' | 'Secrets';
+type Tab = 'Deployments' | 'DaemonSets' | 'StatefulSets' | 'ReplicaSets' | 'Pods' | 'Services' | 'Nodes' | 'Jobs' | 'CronJobs' | 'ConfigMaps' | 'Secrets' | 'PersistentVolumes' | 'PersistentVolumeClaims';
 
-const TABS: Tab[] = ['Deployments', 'DaemonSets', 'StatefulSets', 'ReplicaSets', 'Pods', 'Services', 'Nodes', 'Jobs', 'CronJobs', 'ConfigMaps', 'Secrets'];
+const TABS: Tab[] = ['Deployments', 'DaemonSets', 'StatefulSets', 'ReplicaSets', 'Pods', 'Services', 'Nodes', 'Jobs', 'CronJobs', 'ConfigMaps', 'Secrets', 'PersistentVolumes', 'PersistentVolumeClaims'];
 
-type Props = Pick<AppState, 'Deployments' | 'DaemonSets' | 'StatefulSets' | 'ReplicaSets' | 'Pods' | 'Services' | 'Endpoints' | 'Nodes' | 'Jobs' | 'CronJobs' | 'ConfigMaps' | 'Secrets'>;
+type Props = Pick<AppState, 'Deployments' | 'DaemonSets' | 'StatefulSets' | 'ReplicaSets' | 'Pods' | 'Services' | 'Endpoints' | 'Nodes' | 'Jobs' | 'CronJobs' | 'ConfigMaps' | 'Secrets' | 'PersistentVolumes' | 'PersistentVolumeClaims'>;
 
-export function ResourceTabs({ Deployments, DaemonSets, StatefulSets, ReplicaSets, Pods, Services, Endpoints, Nodes, Jobs, CronJobs, ConfigMaps, Secrets }: Props) {
+export function ResourceTabs({ Deployments, DaemonSets, StatefulSets, ReplicaSets, Pods, Services, Endpoints, Nodes, Jobs, CronJobs, ConfigMaps, Secrets, PersistentVolumes, PersistentVolumeClaims }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('Deployments');
 
   return (
@@ -503,6 +503,73 @@ export function ResourceTabs({ Deployments, DaemonSets, StatefulSets, ReplicaSet
                   <AgeCell timestamp={s.metadata.creationTimestamp} />
                 </tr>
               ))}
+            </tbody>
+          </table>
+        )}
+        {activeTab === 'PersistentVolumes' && (
+          <table className="resource-tabs__table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Capacity</th>
+                <th>Access Modes</th>
+                <th>Reclaim Policy</th>
+                <th>Status</th>
+                <th>Claim</th>
+                <th>StorageClass</th>
+                <th>Age</th>
+              </tr>
+            </thead>
+            <tbody>
+              {PersistentVolumes.map(pv => {
+                const fmtMode = (m: string) => m === 'ReadWriteOnce' ? 'RWO' : m === 'ReadOnlyMany' ? 'ROX' : m === 'ReadWriteMany' ? 'RWX' : m === 'ReadWriteOncePod' ? 'RWOP' : m;
+                const claim = pv.spec.claimRef ? `${pv.spec.claimRef.namespace}/${pv.spec.claimRef.name}` : '';
+                return (
+                  <tr key={pv.metadata.name}>
+                    <td>{pv.metadata.name}</td>
+                    <td>{pv.spec.capacity.storage}</td>
+                    <td>{pv.spec.accessModes.map(fmtMode).join(',')}</td>
+                    <td>{pv.spec.persistentVolumeReclaimPolicy}</td>
+                    <td>{pv.status.phase}</td>
+                    <td>{claim}</td>
+                    <td>{pv.spec.storageClassName ?? ''}</td>
+                    <AgeCell timestamp={pv.metadata.creationTimestamp} />
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+        {activeTab === 'PersistentVolumeClaims' && (
+          <table className="resource-tabs__table">
+            <thead>
+              <tr>
+                <th>Namespace</th>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Volume</th>
+                <th>Capacity</th>
+                <th>Access Modes</th>
+                <th>StorageClass</th>
+                <th>Age</th>
+              </tr>
+            </thead>
+            <tbody>
+              {PersistentVolumeClaims.map(pvc => {
+                const fmtMode = (m: string) => m === 'ReadWriteOnce' ? 'RWO' : m === 'ReadOnlyMany' ? 'ROX' : m === 'ReadWriteMany' ? 'RWX' : m === 'ReadWriteOncePod' ? 'RWOP' : m;
+                return (
+                  <tr key={`${pvc.metadata.namespace}/${pvc.metadata.name}`}>
+                    <td>{pvc.metadata.namespace}</td>
+                    <td>{pvc.metadata.name}</td>
+                    <td>{pvc.status.phase}</td>
+                    <td>{pvc.status.boundVolume ?? ''}</td>
+                    <td>{pvc.status.capacity?.storage ?? ''}</td>
+                    <td>{(pvc.status.accessModes ?? pvc.spec.accessModes).map(fmtMode).join(',')}</td>
+                    <td>{pvc.spec.storageClassName ?? ''}</td>
+                    <AgeCell timestamp={pvc.metadata.creationTimestamp} />
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

@@ -18,6 +18,7 @@ import { useCronJobController } from '../controllers/useCronJobController';
 import { useDaemonSetController } from '../controllers/useDaemonSetController'
 import { useStatefulSetController } from '../controllers/useStatefulSetController';
 import { useServiceController } from '../controllers/useServiceController';
+import { usePVCBinder } from '../controllers/usePVCBinder';
 const STORAGE_KEY = 'k8s-apiserver';
 
 function makeInitialState(): AppState {
@@ -59,6 +60,8 @@ function makeInitialState(): AppState {
     CronJobs: [],
     ConfigMaps: [],
     Secrets: [],
+    PersistentVolumes: [],
+    PersistentVolumeClaims: [],
   };
 }
 
@@ -84,6 +87,7 @@ function App() {
   useDaemonSetController(store, dispatch);
   useStatefulSetController(store, dispatch);
   useServiceController(store, dispatch);
+  usePVCBinder(store, dispatch);
 
   useEffect(() => {
     try {
@@ -164,6 +168,8 @@ function App() {
           CronJobs={store.CronJobs}
           ConfigMaps={store.ConfigMaps}
           Secrets={store.Secrets}
+          PersistentVolumes={store.PersistentVolumes}
+          PersistentVolumeClaims={store.PersistentVolumeClaims}
         />
       </div>
       {/* Bottom panel — always mounted to preserve Console/Browser state */}

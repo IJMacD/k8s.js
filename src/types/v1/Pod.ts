@@ -55,12 +55,29 @@ export interface PodCondition {
     lastTransitionTime?: string; // Optional ISO 8601 format timestamp indicating when the condition last transitioned from one status to another
 }
 
+export interface VolumeMount {
+    name: string;
+    mountPath: string;
+    readOnly?: boolean;
+    subPath?: string;
+}
+
+export interface Volume {
+    name: string;
+    persistentVolumeClaim?: { claimName: string; readOnly?: boolean };
+    configMap?: { name: string; defaultMode?: number };
+    secret?: { secretName: string; defaultMode?: number };
+    emptyDir?: { medium?: string; sizeLimit?: string };
+    hostPath?: { path: string; type?: string };
+}
+
 export interface PodSpec {
     nodeName?: string; // Name of the node the pod is scheduled on
     nodeSelector?: Record<string, string>; // Node label selector constraints for scheduling
     restartPolicy?: "Always" | "OnFailure" | "Never";
     initContainers?: Container[]; // Optional list of init containers that run before app containers
     containers: Container[]; // List of containers that will be part of the pod
+    volumes?: Volume[];
 }
 
 export interface Probe {
@@ -86,6 +103,7 @@ export interface Container {
     ports?: ContainerPort[]; // Optional list of ports to be exposed by the container
     envFrom?: EnvFromSource[]; // Optional list of sources to populate env variables from (ConfigMap/Secret)
     env?: EnvRecord[]; // Optional list of environment variables for the container
+    volumeMounts?: VolumeMount[];
     resources?: ResourceRequirements; // Optional resource requirements for the container
     readinessProbe?: Probe;
     livenessProbe?: Probe;

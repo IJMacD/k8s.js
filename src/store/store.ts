@@ -9,6 +9,8 @@ import type { Job, CronJob } from "../types/batch/v1/Job";
 import type { OwnerReference } from "../types/v1/ObjectMeta";
 import type { ConfigMap } from "../types/v1/ConfigMap";
 import type { Secret } from "../types/v1/Secret";
+import type { PersistentVolume } from "../types/v1/PersistentVolume";
+import type { PersistentVolumeClaim } from "../types/v1/PersistentVolumeClaim";
 
 export interface AppState {
     Deployments: Deployment[];
@@ -23,6 +25,8 @@ export interface AppState {
     CronJobs: CronJob[];
     ConfigMaps: ConfigMap[];
     Secrets: Secret[];
+    PersistentVolumes: PersistentVolume[];
+    PersistentVolumeClaims: PersistentVolumeClaim[];
 }
 
 const CreateDeploymentType = "CREATE_DEPLOYMENT";
@@ -63,6 +67,11 @@ const CreateConfigMapType = "CREATE_CONFIGMAP";
 const DeleteConfigMapType = "DELETE_CONFIGMAP";
 const CreateSecretType = "CREATE_SECRET";
 const DeleteSecretType = "DELETE_SECRET";
+const CreatePVType = "CREATE_PV";
+const DeletePVType = "DELETE_PV";
+const CreatePVCType = "CREATE_PVC";
+const DeletePVCType = "DELETE_PVC";
+const BindPVCType = "BIND_PVC";
 
 export type ActionType =
     | typeof CreateDeploymentType
@@ -102,7 +111,12 @@ export type ActionType =
     | typeof CreateConfigMapType
     | typeof DeleteConfigMapType
     | typeof CreateSecretType
-    | typeof DeleteSecretType;
+    | typeof DeleteSecretType
+    | typeof CreatePVType
+    | typeof DeletePVType
+    | typeof CreatePVCType
+    | typeof DeletePVCType
+    | typeof BindPVCType;
 
 export interface CreateDeploymentAction {
     type: typeof CreateDeploymentType;
@@ -330,7 +344,12 @@ export type Action =
     | CreateConfigMapAction
     | { type: typeof DeleteConfigMapType; payload: { name: string; namespace: string } }
     | CreateSecretAction
-    | { type: typeof DeleteSecretType; payload: { name: string; namespace: string } };
+    | { type: typeof DeleteSecretType; payload: { name: string; namespace: string } }
+    | CreatePVAction
+    | { type: typeof DeletePVType; payload: { name: string } }
+    | CreatePVCAction
+    | { type: typeof DeletePVCType; payload: { name: string; namespace: string } }
+    | { type: typeof BindPVCType; payload: { pvcName: string; pvcNamespace: string; pvName: string } };
 
 export function deleteDeployment(name: string, namespace = "default") {
     return { type: DeleteDeploymentType as typeof DeleteDeploymentType, payload: { name, namespace } };
@@ -451,6 +470,66 @@ export function createSecret(
 
 export function deleteSecret(name: string, namespace = "default") {
     return { type: DeleteSecretType as typeof DeleteSecretType, payload: { name, namespace } };
+}
+
+export interface CreatePVAction {
+    type: typeof CreatePVType;
+    payload: {
+        name: string;
+        capacity: { storage: string };
+        accessModes: import("../types/v1/PersistentVolume").AccessMode[];
+        persistentVolumeReclaimPolicy: "Retain" | "Delete";
+        storageClassName?: string;
+        volumeMode?: "Filesystem" | "Block";
+        nodeAffinity?: import("../types/v1/PersistentVolume").PVSpec["nodeAffinity"];
+        hostPath?: { path: string; type?: string };
+        nfs?: { server: string; path: string; readOnly?: boolean };
+        local?: { path: string; fsType?: string };
+        creationTimestamp: string;
+    };
+}
+
+export function createPersistentVolume(
+    name: string,
+    payload: Omit<CreatePVAction["payload"], "name">,
+): CreatePVAction {
+    return { type: CreatePVType, payload: { name, ...payload } };
+}
+
+export function deletePersistentVolume(name: string) {
+    return { type: DeletePVType as typeof DeletePVType, payload: { name } };
+}
+
+export interface CreatePVCAction {
+    type: typeof CreatePVCType;
+    payload: {
+        name: string;
+        namespace: string;
+        accessModes: import("../types/v1/PersistentVolume").AccessMode[];
+        storage: string;
+        storageClassName?: string;
+        volumeName?: string;
+        volumeMode?: "Filesystem" | "Block";
+        labels?: Record<string, string>;
+        annotations?: Record<string, string>;
+        creationTimestamp: string;
+    };
+}
+
+export function createPersistentVolumeClaim(
+    name: string,
+    payload: Omit<CreatePVCAction["payload"], "name" | "namespace">,
+    namespace = "default",
+): CreatePVCAction {
+    return { type: CreatePVCType, payload: { name, namespace, ...payload } };
+}
+
+export function deletePersistentVolumeClaim(name: string, namespace = "default") {
+    return { type: DeletePVCType as typeof DeletePVCType, payload: { name, namespace } };
+}
+
+export function bindPVC(pvcName: string, pvcNamespace: string, pvName: string) {
+    return { type: BindPVCType as typeof BindPVCType, payload: { pvcName, pvcNamespace, pvName } };
 }
 
 export function scaleStatefulSet(name: string, replicas: number, namespace = "default") {
@@ -1323,6 +1402,8 @@ export const reducer = (state: AppState, action: Action): AppState => {
             case "cronjob":    return { ...state, CronJobs:     state.CronJobs.map(r => match(r) ? apply(r) : r) };
             case "configmap": return { ...state, ConfigMaps: state.ConfigMaps.map(r => match(r) ? apply(r) : r) };
             case "secret": return { ...state, Secrets: state.Secrets.map(r => match(r) ? apply(r) : r) };
+            case "persistentvolume": return { ...state, PersistentVolumes: state.PersistentVolumes.map(r => match(r) ? apply(r) : r) };
+            case "persistentvolumeclaim": return { ...state, PersistentVolumeClaims: state.PersistentVolumeClaims.map(r => match(r) ? apply(r) : r) };
         }
     }
     if (action.type === CreateConfigMapType) {
@@ -1383,6 +1464,119 @@ export const reducer = (state: AppState, action: Action): AppState => {
             ...state,
             Secrets: state.Secrets.filter(
                 s => !(s.metadata.name === name && s.metadata.namespace === namespace),
+            ),
+        };
+    }
+    if (action.type === CreatePVType) {
+        const { name, capacity, accessModes, persistentVolumeReclaimPolicy, storageClassName, volumeMode, nodeAffinity, hostPath, nfs, local, creationTimestamp } = action.payload;
+        const pv: PersistentVolume = {
+            metadata: {
+                uid: crypto.randomUUID(),
+                name,
+                labels: {},
+                annotations: {},
+                creationTimestamp,
+            },
+            spec: {
+                capacity,
+                accessModes,
+                persistentVolumeReclaimPolicy,
+                ...(storageClassName !== undefined ? { storageClassName } : {}),
+                ...(volumeMode !== undefined ? { volumeMode } : {}),
+                ...(nodeAffinity !== undefined ? { nodeAffinity } : {}),
+                ...(hostPath !== undefined ? { hostPath } : {}),
+                ...(nfs !== undefined ? { nfs } : {}),
+                ...(local !== undefined ? { local } : {}),
+            },
+            status: { phase: "Available" },
+        };
+        return { ...state, PersistentVolumes: [...state.PersistentVolumes, pv] };
+    }
+    if (action.type === DeletePVType) {
+        const { name } = action.payload;
+        return {
+            ...state,
+            PersistentVolumes: state.PersistentVolumes.filter(pv => pv.metadata.name !== name),
+        };
+    }
+    if (action.type === CreatePVCType) {
+        const { name, namespace, accessModes, storage, storageClassName, volumeName, volumeMode, labels, annotations, creationTimestamp } = action.payload;
+        const pvc: PersistentVolumeClaim = {
+            metadata: {
+                uid: crypto.randomUUID(),
+                name,
+                namespace,
+                labels: labels ?? {},
+                annotations: annotations ?? {},
+                creationTimestamp,
+            },
+            spec: {
+                accessModes,
+                resources: { requests: { storage } },
+                ...(storageClassName !== undefined ? { storageClassName } : {}),
+                ...(volumeName !== undefined ? { volumeName } : {}),
+                ...(volumeMode !== undefined ? { volumeMode } : {}),
+            },
+            status: { phase: "Pending" },
+        };
+        return { ...state, PersistentVolumeClaims: [...state.PersistentVolumeClaims, pvc] };
+    }
+    if (action.type === DeletePVCType) {
+        const { name, namespace } = action.payload;
+        const pvc = state.PersistentVolumeClaims.find(
+            c => c.metadata.name === name && c.metadata.namespace === namespace,
+        );
+        let pvs = state.PersistentVolumes;
+        if (pvc?.status.boundVolume) {
+            const pvName = pvc.status.boundVolume;
+            const pv = pvs.find(p => p.metadata.name === pvName);
+            if (pv) {
+                if (pv.spec.persistentVolumeReclaimPolicy === "Delete") {
+                    pvs = pvs.filter(p => p.metadata.name !== pvName);
+                } else {
+                    // Retain: release the PV (clear claimRef, phase → Released)
+                    pvs = pvs.map(p => p.metadata.name !== pvName ? p : {
+                        ...p,
+                        spec: { ...p.spec, claimRef: undefined },
+                        status: { ...p.status, phase: "Released" as const },
+                    });
+                }
+            }
+        }
+        return {
+            ...state,
+            PersistentVolumes: pvs,
+            PersistentVolumeClaims: state.PersistentVolumeClaims.filter(
+                c => !(c.metadata.name === name && c.metadata.namespace === namespace),
+            ),
+        };
+    }
+    if (action.type === BindPVCType) {
+        const { pvcName, pvcNamespace, pvName } = action.payload;
+        const pv = state.PersistentVolumes.find(p => p.metadata.name === pvName);
+        const pvc = state.PersistentVolumeClaims.find(
+            c => c.metadata.name === pvcName && c.metadata.namespace === pvcNamespace,
+        );
+        if (!pv || !pvc) return state;
+        return {
+            ...state,
+            PersistentVolumes: state.PersistentVolumes.map(p =>
+                p.metadata.name !== pvName ? p : {
+                    ...p,
+                    spec: { ...p.spec, claimRef: { name: pvcName, namespace: pvcNamespace, uid: pvc.metadata.uid } },
+                    status: { ...p.status, phase: "Bound" as const },
+                }
+            ),
+            PersistentVolumeClaims: state.PersistentVolumeClaims.map(c =>
+                !(c.metadata.name === pvcName && c.metadata.namespace === pvcNamespace) ? c : {
+                    ...c,
+                    status: {
+                        phase: "Bound" as const,
+                        capacity: pv.spec.capacity,
+                        accessModes: pv.spec.accessModes,
+                        boundVolume: pvName,
+                    },
+                }
             ),
         };
     }

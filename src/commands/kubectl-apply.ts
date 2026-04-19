@@ -1,11 +1,13 @@
 import type { ActionDispatch } from "react";
-import type { Container, Probe, PodTemplateSpec } from "../types/v1/Pod";
+import type { Container, Probe, PodTemplateSpec, Volume } from "../types/v1/Pod";
 import {
     createConfigMap,
     createCronJob,
     createDaemonSet,
     createDeployment,
     createJob,
+    createPersistentVolume,
+    createPersistentVolumeClaim,
     createSecret,
     createService,
     createStatefulSet,
@@ -13,6 +15,7 @@ import {
     type Action,
     type AppState,
 } from "../store/store";
+import type { AccessMode } from "../types/v1/PersistentVolume";
 import { readFile } from "./filesystem";
 
 /** Parse a raw containers/initContainers array, normalising types */
@@ -60,6 +63,7 @@ function parseContainerArray(raw: unknown): Container[] | undefined {
             : {}),
         ...(Array.isArray(c.envFrom) && c.envFrom.length > 0 ? { envFrom: c.envFrom as Container["envFrom"] } : {}),
         ...(Array.isArray(c.env) && c.env.length > 0 ? { env: c.env as Container["env"] } : {}),
+        ...(Array.isArray(c.volumeMounts) && c.volumeMounts.length > 0 ? { volumeMounts: c.volumeMounts as Container["volumeMounts"] } : {}),
         ...(parseProbe(c.readinessProbe) ? { readinessProbe: parseProbe(c.readinessProbe) } : {}),
         ...(parseProbe(c.livenessProbe)  ? { livenessProbe:  parseProbe(c.livenessProbe)  } : {}),
         ...(parseProbe(c.startupProbe)   ? { startupProbe:   parseProbe(c.startupProbe)   } : {}),
@@ -83,6 +87,26 @@ function parseTemplate(rawTemplate: unknown, defaultName: string, defaultNamespa
         ? rawSpec.restartPolicy as "Always" | "OnFailure" | "Never"
         : undefined;
     const nodeName = typeof rawSpec?.nodeName === "string" ? rawSpec.nodeName : undefined;
+    // Parse volumes (e.g. PVC references)
+    const rawVolumes = Array.isArray(rawSpec?.volumes) ? rawSpec.volumes as Array<Record<string, unknown>> : [];
+    const volumes: Volume[] = rawVolumes.map(v => ({
+        name: typeof v.name === "string" ? v.name : "",
+        ...(v.persistentVolumeClaim && typeof v.persistentVolumeClaim === "object"
+            ? { persistentVolumeClaim: v.persistentVolumeClaim as Volume["persistentVolumeClaim"] }
+            : {}),
+        ...(v.configMap && typeof v.configMap === "object"
+            ? { configMap: v.configMap as Volume["configMap"] }
+            : {}),
+        ...(v.secret && typeof v.secret === "object"
+            ? { secret: v.secret as Volume["secret"] }
+            : {}),
+        ...(v.emptyDir !== undefined
+            ? { emptyDir: (typeof v.emptyDir === "object" && v.emptyDir !== null ? v.emptyDir : {}) as Volume["emptyDir"] }
+            : {}),
+        ...(v.hostPath && typeof v.hostPath === "object"
+            ? { hostPath: v.hostPath as Volume["hostPath"] }
+            : {}),
+    }));
     return {
         metadata: {
             name: defaultName,
@@ -94,6 +118,7 @@ function parseTemplate(rawTemplate: unknown, defaultName: string, defaultNamespa
             ...(initContainers?.length ? { initContainers } : {}),
             ...(restartPolicy ? { restartPolicy } : {}),
             ...(nodeName ? { nodeName } : {}),
+            ...(volumes.length > 0 ? { volumes } : {}),
         },
     };
 }
@@ -280,6 +305,58 @@ export async function* kubectlApply(
                 } else {
                     dispatch(patchResource("secret", name, { data }, docNs));
                     yield `secret/${name} configured`;
+                }
+                break;
+            }
+            case "persistentvolume": {
+                const capacity = { storage: (spec?.capacity as Record<string, string> | undefined)?.storage ?? "1Gi" };
+                const accessModes = (Array.isArray(spec?.accessModes) ? spec.accessModes : ["ReadWriteOnce"]) as AccessMode[];
+                const persistentVolumeReclaimPolicy = (typeof spec?.persistentVolumeReclaimPolicy === "string"
+                    ? spec.persistentVolumeReclaimPolicy
+                    : "Retain") as "Retain" | "Delete";
+                const storageClassName = typeof spec?.storageClassName === "string" ? spec.storageClassName : undefined;
+                const volumeMode = (typeof spec?.volumeMode === "string" ? spec.volumeMode : undefined) as "Filesystem" | "Block" | undefined;
+                const nodeAffinity = spec?.nodeAffinity as import("../types/v1/PersistentVolume").PVSpec["nodeAffinity"] | undefined;
+                const hostPath = spec?.hostPath as { path: string; type?: string } | undefined;
+                const nfs = spec?.nfs as { server: string; path: string; readOnly?: boolean } | undefined;
+                const local = spec?.local as { path: string; fsType?: string } | undefined;
+                if (!state.PersistentVolumes.some(pv => pv.metadata.name === name)) {
+                    dispatch(createPersistentVolume(name, {
+                        capacity, accessModes, persistentVolumeReclaimPolicy,
+                        ...(storageClassName !== undefined ? { storageClassName } : {}),
+                        ...(volumeMode !== undefined ? { volumeMode } : {}),
+                        ...(nodeAffinity !== undefined ? { nodeAffinity } : {}),
+                        ...(hostPath !== undefined ? { hostPath } : {}),
+                        ...(nfs !== undefined ? { nfs } : {}),
+                        ...(local !== undefined ? { local } : {}),
+                        creationTimestamp: new Date().toISOString(),
+                    }));
+                    yield `persistentvolume/${name} created`;
+                } else {
+                    dispatch(patchResource("persistentvolume", name, { spec }, docNs));
+                    yield `persistentvolume/${name} configured`;
+                }
+                break;
+            }
+            case "persistentvolumeclaim": {
+                const resources = ((spec?.resources ?? {}) as Record<string, unknown>);
+                const storage = ((resources?.requests ?? {}) as Record<string, string>).storage ?? "1Gi";
+                const accessModes = (Array.isArray(spec?.accessModes) ? spec.accessModes : ["ReadWriteOnce"]) as AccessMode[];
+                const storageClassName = typeof spec?.storageClassName === "string" ? spec.storageClassName : undefined;
+                const volumeName = typeof spec?.volumeName === "string" ? spec.volumeName : undefined;
+                const volumeMode = (typeof spec?.volumeMode === "string" ? spec.volumeMode : undefined) as "Filesystem" | "Block" | undefined;
+                if (!state.PersistentVolumeClaims.some(pvc => pvc.metadata.name === name && pvc.metadata.namespace === docNs)) {
+                    dispatch(createPersistentVolumeClaim(name, {
+                        accessModes, storage,
+                        ...(storageClassName !== undefined ? { storageClassName } : {}),
+                        ...(volumeName !== undefined ? { volumeName } : {}),
+                        ...(volumeMode !== undefined ? { volumeMode } : {}),
+                        creationTimestamp: new Date().toISOString(),
+                    }, docNs));
+                    yield `persistentvolumeclaim/${name} created`;
+                } else {
+                    dispatch(patchResource("persistentvolumeclaim", name, { spec }, docNs));
+                    yield `persistentvolumeclaim/${name} configured`;
                 }
                 break;
             }
