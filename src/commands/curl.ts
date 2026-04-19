@@ -348,7 +348,22 @@ function resolveEnv(pod: AppState["Pods"][number], state: AppState): Array<[stri
             );
             resolved[e.name] = secret?.data[ref.key] ?? "";
         } else if (e.valueFrom?.fieldRef) {
-            resolved[e.name] = `(${e.valueFrom.fieldRef.fieldPath})`;
+            const fp = e.valueFrom.fieldRef.fieldPath;
+            switch (fp) {
+                case "metadata.name":      resolved[e.name] = pod.metadata.name; break;
+                case "metadata.namespace": resolved[e.name] = pod.metadata.namespace; break;
+                case "metadata.uid":       resolved[e.name] = pod.metadata.uid; break;
+                case "status.podIP":       resolved[e.name] = pod.status.podIP ?? ""; break;
+                case "status.hostIP":      resolved[e.name] = pod.status.hostIP ?? ""; break;
+                case "spec.nodeName":      resolved[e.name] = pod.spec.nodeName ?? ""; break;
+                default: {
+                    const lm = fp.match(/^metadata\.labels\['(.+)'\]$/);
+                    if (lm) { resolved[e.name] = pod.metadata.labels?.[lm[1]] ?? ""; break; }
+                    const am = fp.match(/^metadata\.annotations\['(.+)'\]$/);
+                    if (am) { resolved[e.name] = pod.metadata.annotations?.[am[1]] ?? ""; break; }
+                    resolved[e.name] = `(${fp})`;
+                }
+            }
         }
     }
 
