@@ -1,4 +1,19 @@
 import type { PodTemplateSpec } from "../../v1/Pod";
+import type { AccessMode } from "../../v1/PersistentVolume";
+
+export interface VolumeClaimTemplate {
+    metadata: {
+        name: string;
+        labels?: Record<string, string>;
+        annotations?: Record<string, string>;
+    };
+    spec: {
+        accessModes: AccessMode[];
+        resources: { requests: { storage: string } };
+        storageClassName?: string;
+        volumeMode?: "Filesystem" | "Block";
+    };
+}
 
 export interface StatefulSet {
     metadata: StatefulSetMetadata;
@@ -24,6 +39,7 @@ export interface StatefulSetSpec {
     podManagementPolicy?: "OrderedReady" | "Parallel";
     updateStrategy?: { type: "RollingUpdate" | "OnDelete" };
     revisionHistoryLimit?: number;
+    volumeClaimTemplates?: VolumeClaimTemplate[];
 }
 
 export interface StatefulSetStatus {

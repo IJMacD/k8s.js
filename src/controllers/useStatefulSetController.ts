@@ -1,7 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { ActionDispatch } from "react";
 import type { AppState, Action } from "../store/store";
-import { createPod, deletePod, updateStatefulSetStatus } from "../store/store";
+import { createPod, createPersistentVolumeClaim, deletePod, updateStatefulSetStatus } from "../store/store";
 
 /** Simulated reconciliation delay in milliseconds */
 const RECONCILE_DELAY_MS = 2_000;
@@ -20,7 +20,8 @@ export function useStatefulSetController(
     state: AppState,
     dispatch: ActionDispatch<[action: Action]>,
 ) {
-    const { StatefulSets, Pods } = state;
+    const { StatefulSets, Pods, PersistentVolumeClaims } = state;
+    const pvcCreatedRef = useRef<Set<string>>(new Set());
 
     useEffect(() => {
         const timers: ReturnType<typeof setTimeout>[] = [];
@@ -62,6 +63,38 @@ export function useStatefulSetController(
 
             const makePod = (podIndex: number) => {
                 const podName = `${name}-${podIndex}`;
+
+                // Create PVCs from volumeClaimTemplates for this ordinal (idempotent)
+                for (const vct of sts.spec.volumeClaimTemplates ?? []) {
+                    const claimName = `${vct.metadata.name}-${name}-${podIndex}`;
+                    const pvcKey = `${namespace}/${claimName}`;
+                    const alreadyExists = PersistentVolumeClaims.some(
+                        c => c.metadata.name === claimName && c.metadata.namespace === namespace,
+                    );
+                    if (!alreadyExists && !pvcCreatedRef.current.has(pvcKey)) {
+                        pvcCreatedRef.current.add(pvcKey);
+                        dispatch(createPersistentVolumeClaim(claimName, {
+                            accessModes: vct.spec.accessModes,
+                            storage: vct.spec.resources.requests.storage,
+                            ...(vct.spec.storageClassName !== undefined ? { storageClassName: vct.spec.storageClassName } : {}),
+                            ...(vct.spec.volumeMode !== undefined ? { volumeMode: vct.spec.volumeMode } : {}),
+                            labels: { ...vct.metadata.labels },
+                            annotations: { ...vct.metadata.annotations },
+                            creationTimestamp: new Date().toISOString(),
+                        }, namespace));
+                    }
+                }
+
+                // Inject PVC volume mounts into the pod spec
+                const vctVolumes = (sts.spec.volumeClaimTemplates ?? []).map(vct => ({
+                    name: vct.metadata.name,
+                    persistentVolumeClaim: { claimName: `${vct.metadata.name}-${name}-${podIndex}` },
+                }));
+                const mergedVolumes = [
+                    ...vctVolumes,
+                    ...(sts.spec.template.spec.volumes ?? []),
+                ];
+
                 dispatch(createPod(
                     podName,
                     {
@@ -71,7 +104,10 @@ export function useStatefulSetController(
                                 "statefulset.kubernetes.io/pod-name": podName,
                             },
                         },
-                        spec: sts.spec.template.spec,
+                        spec: {
+                            ...sts.spec.template.spec,
+                            ...(mergedVolumes.length > 0 ? { volumes: mergedVolumes } : {}),
+                        },
                     },
                     namespace,
                     { kind: "StatefulSet", apiVersion: "apps/v1", name, uid },
@@ -117,7 +153,13 @@ export function useStatefulSetController(
         }
 
         return () => timers.forEach(clearTimeout);
-    }, [StatefulSets, Pods, dispatch]);
+    }, [StatefulSets, Pods, PersistentVolumeClaims, dispatch]);
+
+    // Clear pvcCreatedRef when the STS set changes to allow re-provision on re-mount
+    useEffect(() => {
+        const pvcCreated = pvcCreatedRef.current;
+        return () => { pvcCreated.clear(); };
+    }, []);
 
     // Status rollup — separate effect with change-detection to avoid cancelling timers above.
     useEffect(() => {

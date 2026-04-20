@@ -233,9 +233,29 @@ export async function* kubectlApply(
                 const image = template.spec.containers[0]?.image ?? "";
                 const replicas = typeof spec?.replicas === "number" ? spec.replicas : 1;
                 const serviceName = typeof spec?.serviceName === "string" ? spec.serviceName : name;
+                const rawVCTs = Array.isArray(spec?.volumeClaimTemplates) ? spec.volumeClaimTemplates as Array<Record<string, unknown>> : [];
+                const volumeClaimTemplates: import("../types/apps/v1/StatefulSet").VolumeClaimTemplate[] = rawVCTs.map(vct => {
+                    const vctMeta = vct.metadata as Record<string, unknown> | undefined;
+                    const vctSpec = vct.spec as Record<string, unknown> | undefined;
+                    const resources = vctSpec?.resources as Record<string, unknown> | undefined;
+                    const requests = resources?.requests as Record<string, string> | undefined;
+                    return {
+                        metadata: {
+                            name: typeof vctMeta?.name === "string" ? vctMeta.name : "",
+                            ...(vctMeta?.labels && typeof vctMeta.labels === "object" ? { labels: vctMeta.labels as Record<string, string> } : {}),
+                            ...(vctMeta?.annotations && typeof vctMeta.annotations === "object" ? { annotations: vctMeta.annotations as Record<string, string> } : {}),
+                        },
+                        spec: {
+                            accessModes: (Array.isArray(vctSpec?.accessModes) ? vctSpec.accessModes : ["ReadWriteOnce"]) as import("../types/v1/PersistentVolume").AccessMode[],
+                            resources: { requests: { storage: requests?.storage ?? "1Gi" } },
+                            ...(typeof vctSpec?.storageClassName === "string" ? { storageClassName: vctSpec.storageClassName } : {}),
+                            ...(typeof vctSpec?.volumeMode === "string" ? { volumeMode: vctSpec.volumeMode as "Filesystem" | "Block" } : {}),
+                        },
+                    };
+                });
                 if (!state.StatefulSets.some(s => s.metadata.name === name && s.metadata.namespace === docNs)) {
                     if (!image) throw Error(`kubectl apply: StatefulSet "${name}": containers[0].image is required`);
-                    dispatch(createStatefulSet(name, { replicas, serviceName, template }, docNs));
+                    dispatch(createStatefulSet(name, { replicas, serviceName, template, ...(volumeClaimTemplates.length > 0 ? { volumeClaimTemplates } : {}) }, docNs));
                     yield `statefulset.apps/${name} created`;
                 } else {
                     dispatch(patchResource("statefulset", name, { spec }, docNs));

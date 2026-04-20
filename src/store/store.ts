@@ -158,7 +158,14 @@ export interface CreateDaemonSetAction {
 
 export interface CreateStatefulSetAction {
     type: typeof CreateStatefulSetType;
-    payload: { name: string; namespace: string; replicas: number; serviceName: string; template: import("../types/v1/Pod").PodTemplateSpec };
+    payload: {
+        name: string;
+        namespace: string;
+        replicas: number;
+        serviceName: string;
+        template: import("../types/v1/Pod").PodTemplateSpec;
+        volumeClaimTemplates?: import("../types/apps/v1/StatefulSet").VolumeClaimTemplate[];
+    };
 }
 
 export interface UpdateStatefulSetStatusAction {
@@ -389,7 +396,12 @@ export function deleteDaemonSet(name: string, namespace = "default") {
 
 export function createStatefulSet(
     name: string,
-    spec: { replicas?: number; serviceName?: string; template: import("../types/v1/Pod").PodTemplateSpec },
+    spec: {
+        replicas?: number;
+        serviceName?: string;
+        template: import("../types/v1/Pod").PodTemplateSpec;
+        volumeClaimTemplates?: import("../types/apps/v1/StatefulSet").VolumeClaimTemplate[];
+    },
     namespace = "default",
 ): CreateStatefulSetAction {
     return {
@@ -400,6 +412,7 @@ export function createStatefulSet(
             replicas: spec.replicas ?? 1,
             serviceName: spec.serviceName ?? name,
             template: spec.template,
+            ...(spec.volumeClaimTemplates?.length ? { volumeClaimTemplates: spec.volumeClaimTemplates } : {}),
         },
     };
 }
@@ -1344,7 +1357,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         };
     }
     if (action.type === CreateStatefulSetType) {
-        const { name, namespace, replicas, serviceName, template } = action.payload;
+        const { name, namespace, replicas, serviceName, template, volumeClaimTemplates } = action.payload;
         const creationTimestamp = new Date().toISOString();
         const labels = template.metadata.labels ?? { app: name };
         const sts: StatefulSet = {
@@ -1364,6 +1377,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
                 serviceName,
                 podManagementPolicy: "OrderedReady",
                 updateStrategy: { type: "RollingUpdate" },
+                ...(volumeClaimTemplates?.length ? { volumeClaimTemplates } : {}),
             },
             status: {
                 observedGeneration: 1,

@@ -165,7 +165,19 @@ export async function* kubectlDescribe(
             `Pod Management Policy:  ${sts.spec.podManagementPolicy ?? "OrderedReady"}`,
             `Pods Status:        ${runningCount} Running / ${pendingCount} Waiting / 0 Succeeded / 0 Failed`,
             ...podTemplateLines(sts.spec.template),
-            `Volume Claim Templates:  <none>`,
+            ...(sts.spec.volumeClaimTemplates?.length
+                ? [
+                    `Volume Claim Templates:`,
+                    ...sts.spec.volumeClaimTemplates.map(vct =>
+                        [
+                            `  Name:          ${vct.metadata.name}`,
+                            `  StorageClass:  ${vct.spec.storageClassName ?? "<default>"}`,
+                            `  AccessModes:   ${vct.spec.accessModes.join(",")}`,
+                            `  Capacity:      ${vct.spec.resources.requests.storage}`,
+                        ].join("\n"),
+                    ),
+                ]
+                : [`Volume Claim Templates:  <none>`]),
             `Service Name:  ${sts.spec.serviceName}`,
             `Events:        <none>`,
         ];
