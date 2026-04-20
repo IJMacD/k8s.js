@@ -114,6 +114,12 @@ export function useScheduler(
                 !scheduledRef.current.has(p.metadata.uid),
         );
 
+        // Track PVC→node assignments made in this scheduling pass so RWO pinning
+        // applies correctly across multiple pods scheduled simultaneously.
+        // For RWOP, a true value means the PVC has already been claimed this pass.
+        const pvcNodeInFlight = new Map<string, string>();   // "ns/pvcName" → nodeName (RWO)
+        const pvcClaimedInFlight = new Set<string>();        // "ns/pvcName"            (RWOP)
+
         for (const pod of unscheduled) {
             // NOTE: do NOT add to scheduledRef here — only mark when we actually bind,
             // so that pods which can't be placed now are retried when state changes.
@@ -173,10 +179,16 @@ export function useScheduler(
             for (const pvc of pvcRefs as NonNullable<typeof pvcRefs[number]>[]) {
                 const modes = pvc.spec.accessModes;
                 if (modes.includes("ReadWriteOncePod")) {
-                    // Check if any running pod (not this pod) uses this PVC
-                    const inUse = Pods.some(p =>
+                    // RWOP: only one pod cluster-wide may mount this PVC at a time.
+                    // Block if another non-terminal pod already has it, or if one was
+                    // assigned earlier in this same scheduling pass.
+                    const pvcKey = `${pvc.metadata.namespace}/${pvc.metadata.name}`;
+                    const claimedInFlight = pvcClaimedInFlight.has(pvcKey);
+                    const inUse = claimedInFlight || Pods.some(p =>
                         p.metadata.uid !== pod.metadata.uid &&
-                        p.status.phase === "Running" &&
+                        p.status.phase !== "Succeeded" &&
+                        p.status.phase !== "Failed" &&
+                        p.spec.nodeName &&
                         (p.spec.volumes ?? []).some(v =>
                             v.persistentVolumeClaim?.claimName === pvc.metadata.name &&
                             p.metadata.namespace === pvc.metadata.namespace
@@ -187,10 +199,15 @@ export function useScheduler(
                         break;
                     }
                 } else if (modes.includes("ReadWriteOnce")) {
-                    // Find the node where this PVC is already actively mounted
-                    const pinnedNode = Pods.find(p =>
+                    // Find the node where this PVC is already actively mounted:
+                    // check bound-but-not-yet-Running pods too, and in-flight assignments
+                    // from the current scheduling pass.
+                    const pvcKey = `${pvc.metadata.namespace}/${pvc.metadata.name}`;
+                    const inFlightNode = pvcNodeInFlight.get(pvcKey);
+                    const pinnedNode = inFlightNode ?? Pods.find(p =>
                         p.metadata.uid !== pod.metadata.uid &&
-                        p.status.phase === "Running" &&
+                        p.status.phase !== "Succeeded" &&
+                        p.status.phase !== "Failed" &&
                         p.spec.nodeName &&
                         (p.spec.volumes ?? []).some(v =>
                             v.persistentVolumeClaim?.claimName === pvc.metadata.name &&
@@ -230,6 +247,16 @@ export function useScheduler(
             const chosen = eligibleNodes.reduce((best, node) =>
                 nodeScore(node) < nodeScore(best) ? node : best
             );
+
+            // Record in-flight PVC→node so subsequent pods in this pass respect RWO
+            for (const pvc of pvcRefs as NonNullable<typeof pvcRefs[number]>[]) {
+                const pvcKey = `${pvc.metadata.namespace}/${pvc.metadata.name}`;
+                if (pvc.spec.accessModes.includes("ReadWriteOncePod")) {
+                    pvcClaimedInFlight.add(pvcKey);
+                } else if (pvc.spec.accessModes.includes("ReadWriteOnce")) {
+                    pvcNodeInFlight.set(pvcKey, chosen.metadata.name);
+                }
+            }
 
             timersRef.current.push(setTimeout(() => {
                 dispatch(bindPodToNode(pod.metadata.name, pod.metadata.namespace, chosen.metadata.name));
