@@ -4,15 +4,19 @@ import type { Action, AppState } from '../store/store';
 import { kubectlApply } from '../commands/kubectl-apply';
 import { writeFile } from '../commands/helpers/filesystem';
 
+export type EditorMode = 'kubectl-edit' | 'file-edit';
+
 interface EditorProps {
   state: AppState;
   dispatch: ActionDispatch<[action: Action]>;
   initialContent: string;
   namespace: string;
   onClose: () => void;
+  mode?: EditorMode;
+  filename?: string;
 }
 
-export function Editor({ state, dispatch, initialContent, namespace, onClose }: EditorProps) {
+export function Editor({ state, dispatch, initialContent, namespace, onClose, mode = 'kubectl-edit', filename }: EditorProps) {
   const [content, setContent] = useState(initialContent);
   const [output, setOutput] = useState<string[]>([]);
   const [isErrorOutput, setIsErrorOutput] = useState(false);
@@ -32,6 +36,12 @@ export function Editor({ state, dispatch, initialContent, namespace, onClose }: 
       // Sync React state
       setContent(ta.value);
     }
+  }
+
+  function handleSave() {
+    if (!filename) return;
+    writeFile(filename, content);
+    onClose();
   }
 
   async function handleApply() {
@@ -74,23 +84,43 @@ export function Editor({ state, dispatch, initialContent, namespace, onClose }: 
     <div style={{ display: 'flex', flexDirection: 'column', height: '400px', backgroundColor: '#1e1e1e', fontFamily: 'monospace' }}>
       {/* Toolbar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px', backgroundColor: '#252526', borderBottom: '1px solid #333', flexShrink: 0 }}>
-        <span style={{ color: '#888', fontSize: '11px', flex: 1 }}>namespace: {namespace}</span>
-        <button
-          onClick={handleApply}
-          disabled={applying}
-          style={{
-            background: applying ? '#3a3a3a' : '#6d28d9',
-            border: 'none',
-            borderRadius: '4px',
-            color: applying ? '#666' : '#e0e0e0',
-            cursor: applying ? 'default' : 'pointer',
-            fontFamily: 'monospace',
-            fontSize: '11px',
-            padding: '3px 12px',
-          }}
-        >
-          {applying ? 'Applying…' : 'Apply'}
-        </button>
+        <span style={{ color: '#888', fontSize: '11px', flex: 1 }}>
+          {mode === 'file-edit' ? (filename ?? '') : `namespace: ${namespace}`}
+        </span>
+        {mode === 'file-edit' ? (
+          <button
+            onClick={handleSave}
+            style={{
+              background: '#1d4ed8',
+              border: 'none',
+              borderRadius: '4px',
+              color: '#e0e0e0',
+              cursor: 'pointer',
+              fontFamily: 'monospace',
+              fontSize: '11px',
+              padding: '3px 12px',
+            }}
+          >
+            Save
+          </button>
+        ) : (
+          <button
+            onClick={handleApply}
+            disabled={applying}
+            style={{
+              background: applying ? '#3a3a3a' : '#6d28d9',
+              border: 'none',
+              borderRadius: '4px',
+              color: applying ? '#666' : '#e0e0e0',
+              cursor: applying ? 'default' : 'pointer',
+              fontFamily: 'monospace',
+              fontSize: '11px',
+              padding: '3px 12px',
+            }}
+          >
+            {applying ? 'Applying…' : 'Apply'}
+          </button>
+        )}
         <button
           onClick={onClose}
           style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: '14px', padding: '0 4px' }}

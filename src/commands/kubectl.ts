@@ -17,6 +17,7 @@ import { kubectlScale } from "./kubectl-scale";
 import { kubectlLabel } from "./kubectl-label";
 import { kubectlAnnotate } from "./kubectl-annotate";
 import { kubectlSet } from "./kubectl-set";
+import type { EditorMode } from "../components/Editor";
 
 /**
  * Strips -n / --namespace flags from kubectl args and returns the clean
@@ -42,7 +43,7 @@ export async function* kubectl(
     rawArgs: string[],
     dispatch: ActionDispatch<[action: Action]>,
     getState: () => AppState,
-    openEditor: (yaml: string, namespace: string) => void = () => {},
+    openEditor: (yaml: string, namespace: string, mode?: EditorMode, filename?: string) => void = () => {},
     stdin: string | null = null,
 ): AsyncGenerator<string> {
     const state = getState();

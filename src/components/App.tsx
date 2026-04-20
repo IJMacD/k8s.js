@@ -3,7 +3,8 @@ import './App.css'
 import { Console } from './Console'
 import type { ConsoleHandle } from './Console'
 import { Browser } from './Browser'
-import { Editor } from './Editor'
+import { Editor } from './Editor';
+import type { EditorMode } from './Editor';
 import { reducer, resetState, createNode, type AppState } from '../store/store';
 import type { StorageClass } from '../types/storage/v1/StorageClass';
 import { shell } from '../commands/command';
@@ -86,7 +87,7 @@ function App() {
     return makeInitialState();
   });
   const [bottomTab, setBottomTab] = useState<'terminal' | 'browser' | 'editor' | null>('terminal');
-  const [editorSession, setEditorSession] = useState<{ id: string; yaml: string; namespace: string } | null>(null);
+  const [editorSession, setEditorSession] = useState<{ id: string; yaml: string; namespace: string; mode: EditorMode; filename?: string } | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showAddNode, setShowAddNode] = useState(false);
   const [nodeCpu, setNodeCpu] = useState('4');
@@ -130,8 +131,8 @@ function App() {
     });
   }
 
-  const openEditor = useCallback((yaml: string, ns: string) => {
-    setEditorSession({ id: crypto.randomUUID(), yaml, namespace: ns });
+  const openEditor = useCallback((yaml: string, ns: string, mode: EditorMode = 'kubectl-edit', filename?: string) => {
+    setEditorSession({ id: crypto.randomUUID(), yaml, namespace: ns, mode, filename });
     setBottomTab('editor');
   }, []);
 
@@ -241,6 +242,8 @@ function App() {
               dispatch={dispatch}
               initialContent={editorSession.yaml}
               namespace={editorSession.namespace}
+              mode={editorSession.mode}
+              filename={editorSession.filename}
               onClose={handleEditorClose}
             />
           </div>

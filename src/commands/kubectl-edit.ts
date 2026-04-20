@@ -1,12 +1,13 @@
 import type { AppState } from "../store/store";
 import { kubectlGetYaml } from "./kubectl-get-yaml";
 import { kindAliases } from "./helpers/resource-types";
+import type { EditorMode } from "../components/Editor";
 
 export async function* kubectlEdit(
     args: string[],
     namespace: string,
     state: AppState,
-    openEditor: (yaml: string, namespace: string) => void,
+    openEditor: (yaml: string, namespace: string, mode?: EditorMode, filename?: string) => void,
 ): AsyncGenerator<string> {
     // args[0] === 'edit', args[1] === resource type, args[2] === name (optional slash notation)
     const resourceToken = args[1];

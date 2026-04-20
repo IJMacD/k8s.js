@@ -298,8 +298,18 @@ kubectl label pod nginx tier-
 # Add an annotation
 kubectl annotate deployment web description="main web server"
 
-# Open a resource in the YAML editor
+# Open a Kubernetes resource in the YAML editor
 kubectl edit deployment web
+```
+
+### Working with files
+
+```sh
+# Create or open a file in the editor
+edit test.yaml
+
+# Apply it once saved
+kubectl apply -f test.yaml
 ```
 
 ### Querying all resources

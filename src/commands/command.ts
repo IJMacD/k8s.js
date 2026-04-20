@@ -5,6 +5,7 @@ import { ping } from "./ping";
 import { curl } from "./curl";
 import { nslookup } from "./nslookup";
 import { listFiles, readFile, writeFile } from "./helpers/filesystem";
+import type { EditorMode } from "../components/Editor";
 
 /**
  * Splits a raw input line on the first unquoted `>`, returning the command
@@ -76,7 +77,7 @@ async function* exec(
     args: string[],
     dispatch: ActionDispatch<[action: Action]>,
     getState: () => AppState,
-    openEditor: (yaml: string, namespace: string) => void,
+    openEditor: (yaml: string, namespace: string, mode?: EditorMode, filename?: string) => void,
     stdin: string | null = null,
 ): AsyncGenerator<string> {
     if (command === "") {
@@ -113,6 +114,15 @@ async function* exec(
         yield curl(args, getState());
     } else if (command === "nslookup") {
         yield nslookup(args, getState());
+    } else if (command === "edit") {
+        const filename = args[0];
+        if (!filename) {
+            yield "edit: missing filename";
+            return;
+        }
+        const existing = readFile(filename);
+        if (existing === undefined) writeFile(filename, "");
+        openEditor(existing ?? "", "default", "file-edit", filename);
     } else if (command === "kubectl") {
         yield* kubectl(args, dispatch, getState, openEditor, stdin);
     } else {
@@ -124,7 +134,7 @@ export async function* shell(
     inputLine: string,
     dispatch: ActionDispatch<[action: Action]>,
     getState: () => AppState,
-    openEditor: (yaml: string, namespace: string) => void = () => { },
+    openEditor: (yaml: string, namespace: string, mode?: EditorMode, filename?: string) => void = () => { },
 ): AsyncGenerator<string> {
     const { cmdLine, stdin } = parseHeredoc(inputLine.trim());
     const { cmd, redirectTo } = parseRedirect(cmdLine);
