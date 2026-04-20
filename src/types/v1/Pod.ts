@@ -71,10 +71,15 @@ export interface Volume {
     hostPath?: { path: string; type?: string };
 }
 
+export interface LocalObjectReference {
+    name: string;
+}
+
 export interface PodSpec {
     nodeName?: string; // Name of the node the pod is scheduled on
     nodeSelector?: Record<string, string>; // Node label selector constraints for scheduling
     restartPolicy?: "Always" | "OnFailure" | "Never";
+    imagePullSecrets?: LocalObjectReference[]; // Secrets used to pull container images from private registries
     initContainers?: Container[]; // Optional list of init containers that run before app containers
     containers: Container[]; // List of containers that will be part of the pod
     volumes?: Volume[];

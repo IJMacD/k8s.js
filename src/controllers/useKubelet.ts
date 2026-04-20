@@ -25,6 +25,26 @@ function acquireImage(nodeName: string, image: string): number {
 }
 
 /**
+ * Returns true when the image reference points to a registry that always
+ * requires authentication (AWS ECR, Azure ACR, Google Artifact Registry,
+ * JFrog Artifactory Cloud, GitLab Container Registry).
+ */
+function isPrivateRegistry(image: string): boolean {
+    // The registry host is everything before the first '/' that contains a '.' or ':'
+    const parts = image.split("/");
+    const ref = parts.length > 1 && (parts[0].includes(".") || parts[0].includes(":"))
+        ? parts[0]
+        : "";
+    return (
+        /\.dkr\.ecr\.[^.]+\.amazonaws\.com$/.test(ref) ||
+        /\.azurecr\.io$/.test(ref) ||
+        /\.pkg\.dev$/.test(ref) ||
+        /\.jfrog\.io$/.test(ref) ||
+        ref === "registry.gitlab.com"
+    );
+}
+
+/**
  * Simulates the Kubernetes kubelet.
  * Watches Pods and drives each one through its lifecycle:
  *
@@ -38,6 +58,7 @@ function acquireImage(nodeName: string, image: string): number {
  *     → last container ready: ContainersReady=True, Ready=True, phase=Running
  *     [batch only → +2.0s after Running: phase=Succeeded, containers Terminated]
  */
+
 export function useKubelet(
     state: AppState,
     dispatch: ActionDispatch<[action: Action]>,
@@ -45,7 +66,7 @@ export function useKubelet(
     const scheduledRef = useRef<Set<string>>(new Set());
     const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-    const { Pods, Nodes } = state;
+    const { Pods, Nodes, Secrets } = state;
 
     useEffect(() => {
         for (const pod of Pods) {
@@ -69,6 +90,49 @@ export function useKubelet(
 
             const { name, namespace } = pod.metadata;
             const now = () => new Date().toISOString();
+
+            // ── imagePullSecrets enforcement ────────────────────────────────
+            // Emit ErrImagePull and stall with ImagePullBackOff if any container
+            // image targets a private registry but no imagePullSecret that
+            // both names a real Secret in the same namespace is present.
+            {
+                const allImages = [
+                    ...(pod.spec.initContainers ?? []),
+                    ...pod.spec.containers,
+                ].map(c => c.image ?? "");
+                const privateImages = [...new Set(allImages.filter(isPrivateRegistry))];
+                // A pull secret is valid only if the named Secret actually exists
+                // in the same namespace (mirrors real kubelet behaviour).
+                const hasSecret = (pod.spec.imagePullSecrets ?? []).some(ref =>
+                    Secrets.some(s => s.metadata.name === ref.name && s.metadata.namespace === namespace)
+                );
+                if (privateImages.length > 0 && !hasSecret) {
+                    const missingRefs = (pod.spec.imagePullSecrets ?? []).filter(ref =>
+                        !Secrets.some(s => s.metadata.name === ref.name && s.metadata.namespace === namespace)
+                    );
+                    const obj = { kind: "Pod" as const, name, namespace };
+                    for (const img of privateImages) {
+                        const detail = missingRefs.length > 0
+                            ? `secret "${missingRefs.map(r => r.name).join('", "')}" not found`
+                            : "authentication required — add an imagePullSecret for this registry";
+                        dispatch(emitEvent(obj, "ErrImagePull",
+                            `Failed to pull image "${img}": unauthorized: ${detail}`,
+                            "Warning"));
+                    }
+                    timersRef.current.push(setTimeout(() => {
+                        dispatch(updatePodStatus(name, namespace, {
+                            containerStatuses: pod.spec.containers.map(c => ({
+                                name: c.name,
+                                ready: false,
+                                started: false,
+                                restartCount: 0,
+                                state: { waiting: { reason: "ImagePullBackOff" } },
+                            })),
+                        }));
+                    }, 1_500));
+                    continue;
+                }
+            }
 
             const initContainers = pod.spec.initContainers ?? [];
             const appContainers  = pod.spec.containers;
