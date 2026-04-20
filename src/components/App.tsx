@@ -4,7 +4,7 @@ import { Console } from './Console'
 import type { ConsoleHandle } from './Console'
 import { Browser } from './Browser'
 import { Editor } from './Editor'
-import { reducer, resetState, type AppState } from '../store/store';
+import { reducer, resetState, createNode, type AppState } from '../store/store';
 import type { StorageClass } from '../types/storage/v1/StorageClass';
 import { shell } from '../commands/command';
 import { writeFile } from '../commands/helpers/filesystem';
@@ -87,6 +87,9 @@ function App() {
   const [bottomTab, setBottomTab] = useState<'terminal' | 'browser' | 'editor' | null>('terminal');
   const [editorSession, setEditorSession] = useState<{ id: string; yaml: string; namespace: string } | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showAddNode, setShowAddNode] = useState(false);
+  const [nodeCpu, setNodeCpu] = useState('4');
+  const [nodeMemory, setNodeMemory] = useState('8Gi');
 
   useDeploymentController(store, dispatch);
   useReplicaSetController(store, dispatch);
@@ -158,6 +161,13 @@ function App() {
             style={{ background: '#3a3a3a', border: '1px solid #555', borderRadius: '4px', color: '#d4d4d4', cursor: 'pointer', fontFamily: 'monospace', fontSize: '12px', padding: '4px 12px' }}
           >
             Apply YAML
+          </button>
+          <button
+            onClick={() => { setNodeCpu('4'); setNodeMemory('8Gi'); setShowAddNode(true); }}
+            title="Add a new node to the cluster"
+            style={{ background: '#3a3a3a', border: '1px solid #555', borderRadius: '4px', color: '#d4d4d4', cursor: 'pointer', fontFamily: 'monospace', fontSize: '12px', padding: '4px 12px' }}
+          >
+            Add node
           </button>
           <button
             onClick={() => setShowResetConfirm(true)}
@@ -258,6 +268,70 @@ function App() {
               ✎ EDITOR
             </button>
           )}
+        </div>
+      )}
+      {showAddNode && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}
+          onClick={e => { if (e.target === e.currentTarget) setShowAddNode(false); }}>
+          <div style={{ background: '#252526', border: '1px solid #555', borderRadius: '6px', padding: '24px 28px', minWidth: '320px', width: '100%', maxWidth: '400px' }}>
+            <p style={{ color: '#e0e0e0', margin: '0 0 18px', fontWeight: 600 }}>Add node</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', color: '#aaa', fontSize: '12px', fontFamily: 'monospace' }}>
+                CPU (cores)
+                <input
+                  type="text"
+                  value={nodeCpu}
+                  onChange={e => setNodeCpu(e.target.value)}
+                  placeholder="e.g. 4"
+                  style={{ background: '#1e1e1e', border: '1px solid #555', borderRadius: '4px', color: '#e0e0e0', fontFamily: 'monospace', fontSize: '13px', padding: '6px 8px', outline: 'none' }}
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', color: '#aaa', fontSize: '12px', fontFamily: 'monospace' }}>
+                Memory
+                <input
+                  type="text"
+                  value={nodeMemory}
+                  onChange={e => setNodeMemory(e.target.value)}
+                  placeholder="e.g. 8Gi"
+                  style={{ background: '#1e1e1e', border: '1px solid #555', borderRadius: '4px', color: '#e0e0e0', fontFamily: 'monospace', fontSize: '13px', padding: '6px 8px', outline: 'none' }}
+                />
+              </label>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button
+                onClick={() => setShowAddNode(false)}
+                style={{ background: '#3a3a3a', border: '1px solid #555', borderRadius: '4px', color: '#d4d4d4', cursor: 'pointer', fontFamily: 'monospace', fontSize: '12px', padding: '6px 16px' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const cpu = nodeCpu.trim() || '4';
+                  const memory = nodeMemory.trim() || '8Gi';
+                  const existingNums = store.Nodes
+                    .map(n => { const m = n.metadata.name.match(/^node-(\d+)$/); return m ? parseInt(m[1], 10) : 0; })
+                    .filter(n => n > 0);
+                  const nextNum = existingNums.length > 0 ? Math.max(...existingNums) + 1 : store.Nodes.length + 1;
+                  const name = `node-${nextNum}`;
+                  const usedIPs = new Set(
+                    store.Nodes.flatMap(n => n.status.addresses.filter(a => a.type === 'InternalIP').map(a => a.address)),
+                  );
+                  let internalIP = '';
+                  outer: for (let segment = 0; segment < 256; segment++) {
+                    for (let octet = 1; octet <= 254; octet++) {
+                      const candidate = `192.168.${segment}.${octet}`;
+                      if (!usedIPs.has(candidate)) { internalIP = candidate; break outer; }
+                    }
+                  }
+                  dispatch(createNode(name, { cpu, memory, internalIP }));
+                  setShowAddNode(false);
+                }}
+                style={{ background: '#1d4023', border: '1px solid #4ade80', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontFamily: 'monospace', fontSize: '12px', padding: '6px 16px' }}
+              >
+                Add
+              </button>
+            </div>
+          </div>
         </div>
       )}
       {showResetConfirm && (
