@@ -4,6 +4,7 @@ import {
     type Action,
     type AppState,
 } from "../store/store";
+import { kindAliases } from "./helpers/resource-types";
 
 export async function* kubectlExpose(
     args: string[],
@@ -12,12 +13,13 @@ export async function* kubectlExpose(
     dispatch: ActionDispatch<[action: Action]>,
 ): AsyncGenerator<string> {
     // kubectl expose (deployment|replicaset|statefulset|daemonset|pod|service) <name> --port=80 ...
-    const resourceType = args[1]?.toLowerCase();
+    const rawType = args[1]?.toLowerCase();
+    const resourceType = kindAliases[rawType];
     const name = args[2];
 
-    const supported = ["deployment", "replicaset", "rs", "statefulset", "sts", "daemonset", "ds", "pod", "po", "service", "svc"];
-    if (!supported.includes(resourceType)) {
-        throw Error(`kubectl expose: unsupported resource type "${resourceType}". Supported: deployment, replicaset, statefulset, daemonset, pod, service`);
+    const supportedKinds = ["deployment", "replicaset", "statefulset", "daemonset", "pod", "service"];
+    if (!resourceType || !supportedKinds.includes(resourceType)) {
+        throw Error(`kubectl expose: unsupported resource type "${rawType}". Supported: deployment, replicaset, statefulset, daemonset, pod, service`);
     }
     if (!name) throw Error(`kubectl expose: missing resource name`);
 
@@ -29,19 +31,19 @@ export async function* kubectlExpose(
         const r = state.Deployments.find(d => d.metadata.name === name && d.metadata.namespace === namespace);
         if (!r) throw Error(`Error from server (NotFound): deployments "${name}" not found`);
         selector = r.spec.selector.matchLabels;
-    } else if (resourceType === "replicaset" || resourceType === "rs") {
+    } else if (resourceType === "replicaset") {
         const r = state.ReplicaSets.find(d => d.metadata.name === name && d.metadata.namespace === namespace);
         if (!r) throw Error(`Error from server (NotFound): replicasets "${name}" not found`);
         selector = r.spec.selector.matchLabels;
-    } else if (resourceType === "statefulset" || resourceType === "sts") {
+    } else if (resourceType === "statefulset") {
         const r = state.StatefulSets.find(d => d.metadata.name === name && d.metadata.namespace === namespace);
         if (!r) throw Error(`Error from server (NotFound): statefulsets "${name}" not found`);
         selector = r.spec.selector.matchLabels;
-    } else if (resourceType === "daemonset" || resourceType === "ds") {
+    } else if (resourceType === "daemonset") {
         const r = state.DaemonSets.find(d => d.metadata.name === name && d.metadata.namespace === namespace);
         if (!r) throw Error(`Error from server (NotFound): daemonsets "${name}" not found`);
         selector = r.spec.selector.matchLabels;
-    } else if (resourceType === "pod" || resourceType === "po") {
+    } else if (resourceType === "pod") {
         const r = state.Pods.find(p => p.metadata.name === name && p.metadata.namespace === namespace);
         if (!r) throw Error(`Error from server (NotFound): pods "${name}" not found`);
         // Expose a pod by using its existing labels as the selector (same behaviour as kubectl)
