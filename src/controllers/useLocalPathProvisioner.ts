@@ -62,12 +62,14 @@ export function useLocalPathProvisioner(
 
             const pvName = `pvc-${pvc.metadata.uid}`;
             const path = `/var/local-path-provisioner/${pvc.metadata.namespace}_${pvc.metadata.name}_${pvc.metadata.uid}`;
+            const sc = StorageClasses.find(s => s.metadata.name === pvc.spec.storageClassName);
+            const reclaimPolicy = sc?.reclaimPolicy ?? "Delete";
 
             timersRef.current.push(setTimeout(() => {
                 dispatch(createPersistentVolume(pvName, {
                     capacity: { storage: pvc.spec.resources.requests.storage },
                     accessModes: pvc.spec.accessModes,
-                    persistentVolumeReclaimPolicy: "Delete",
+                    persistentVolumeReclaimPolicy: reclaimPolicy,
                     storageClassName: pvc.spec.storageClassName,
                     ...(pvc.spec.volumeMode ? { volumeMode: pvc.spec.volumeMode } : {}),
                     local: { path },
