@@ -9,6 +9,52 @@ import { useSavedState } from "../hooks/useSavedState";
 const PROMPT = '> ';
 const PROMPT_CONT = '  '; // continuation prompt, same width as PROMPT
 
+/**
+ * Returns true if `input` contains an open heredoc whose closing word has
+ * not yet appeared on its own line.
+ */
+function isInHeredoc(input: string): boolean {
+    const lines = input.split('\n');
+    let openWord: string | null = null;
+    for (const line of lines) {
+        if (openWord === null) {
+            const m = line.match(/<<(\w+)\s*$/);
+            if (m) openWord = m[1];
+        } else {
+            if (line.trim() === openWord) openWord = null;
+        }
+    }
+    return openWord !== null;
+}
+
+/**
+ * Groups lines of multi-line input into individual commands, keeping heredoc
+ * blocks (<<WORD ... WORD) together as a single command string.
+ */
+function groupCommands(lines: string[]): string[] {
+    const result: string[] = [];
+    let i = 0;
+    while (i < lines.length) {
+        const line = lines[i];
+        const heredocMatch = line.match(/<<(\w+)\s*$/);
+        if (heredocMatch) {
+            const word = heredocMatch[1];
+            const block: string[] = [line];
+            i++;
+            while (i < lines.length) {
+                block.push(lines[i]);
+                if (lines[i].trim() === word) { i++; break; }
+                i++;
+            }
+            result.push(block.join('\n'));
+        } else {
+            if (line.trim() !== '') result.push(line);
+            i++;
+        }
+    }
+    return result;
+}
+
 export interface ConsoleHandle {
     submitCommand: (cmd: string) => void;
 }
@@ -49,7 +95,7 @@ export const Console = forwardRef<ConsoleHandle, { onCommand: (command: string) 
 
     const submitInput = () => {
         const lines = input.split('\n');
-        const commands = lines.filter(l => l.trim() !== '');
+        const commands = groupCommands(lines);
         // Echo the typed input (with continuation prompt on wrapped lines)
         const echo = lines.map((l, i) => `${i === 0 ? PROMPT : PROMPT_CONT}${l}`).join('\n');
         setOutput(prev => [...prev, echo]);
@@ -110,6 +156,19 @@ export const Console = forwardRef<ConsoleHandle, { onCommand: (command: string) 
      // Handle keyboard shortcuts
      const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (event.key === 'Enter' && !event.shiftKey) {
+            if (isInHeredoc(input)) {
+                // Mid-heredoc: insert a newline and let the user keep typing
+                event.preventDefault();
+                const el = inputRef.current!;
+                const pos = el.selectionStart;
+                const next = input.slice(0, pos) + '\n' + input.slice(el.selectionEnd);
+                setInput(next);
+                requestAnimationFrame(() => {
+                    el.selectionStart = el.selectionEnd = pos + 1;
+                    autoResize(el);
+                });
+                return;
+            }
             event.preventDefault();
             submitInput();
         } else if (event.key === 'ArrowUp') {

@@ -56,12 +56,28 @@ function tokenize(input: string): string[] {
     return tokens;
 }
 
+/**
+ * Detects a heredoc redirection (`<<WORD`) in a (potentially multi-line) input,
+ * extracts the command portion and the stdin body.
+ *
+ * Example input:
+ *   "kubectl apply -f - <<EOF\napiVersion: v1\n...\nEOF"
+ * Returns:
+ *   { cmdLine: "kubectl apply -f -", stdin: "apiVersion: v1\n..." }
+ */
+function parseHeredoc(inputLine: string): { cmdLine: string; stdin: string | null } {
+    const m = inputLine.match(/^(.*?)<<(\w+)[^\n]*\n([\s\S]*?)\n?\2\s*$/);
+    if (!m) return { cmdLine: inputLine, stdin: null };
+    return { cmdLine: m[1].trim(), stdin: m[3] };
+}
+
 async function* exec(
     command: string,
     args: string[],
     dispatch: ActionDispatch<[action: Action]>,
     getState: () => AppState,
     openEditor: (yaml: string, namespace: string) => void,
+    stdin: string | null = null,
 ): AsyncGenerator<string> {
     if (command === "") {
         return;
@@ -98,7 +114,7 @@ async function* exec(
     } else if (command === "nslookup") {
         yield nslookup(args, getState());
     } else if (command === "kubectl") {
-        yield* kubectl(args, dispatch, getState, openEditor);
+        yield* kubectl(args, dispatch, getState, openEditor, stdin);
     } else {
         yield `Unknown command: ${command}`;
     }
@@ -110,7 +126,8 @@ export async function* shell(
     getState: () => AppState,
     openEditor: (yaml: string, namespace: string) => void = () => { },
 ): AsyncGenerator<string> {
-    const { cmd, redirectTo } = parseRedirect(inputLine.trim());
+    const { cmdLine, stdin } = parseHeredoc(inputLine.trim());
+    const { cmd, redirectTo } = parseRedirect(cmdLine);
     const tokens = tokenize(cmd);
     // Lowercase only the command verb, not flag values (preserves cron schedules, images, etc.)
     const command = (tokens[0] ?? "").toLowerCase();
@@ -118,12 +135,12 @@ export async function* shell(
 
     if (redirectTo) {
         const lines: string[] = [];
-        for await (const line of exec(command, args, dispatch, getState, openEditor)) {
+        for await (const line of exec(command, args, dispatch, getState, openEditor, stdin)) {
             lines.push(line);
         }
         writeFile(redirectTo, lines.join("\n"));
         return;
     }
 
-    yield* exec(command, args, dispatch, getState, openEditor);
+    yield* exec(command, args, dispatch, getState, openEditor, stdin);
 }

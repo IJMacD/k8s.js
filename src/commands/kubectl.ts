@@ -43,11 +43,12 @@ export async function* kubectl(
     dispatch: ActionDispatch<[action: Action]>,
     getState: () => AppState,
     openEditor: (yaml: string, namespace: string) => void = () => {},
+    stdin: string | null = null,
 ): AsyncGenerator<string> {
     const state = getState();
     const { namespace, args } = parseKubectlArgs(rawArgs);
     if (args[0] === "apply") {
-        yield* kubectlApply(args, namespace, state, dispatch);
+        yield* kubectlApply(args, namespace, state, dispatch, stdin);
         return;
     }
     if (args[0] === "run" || args[0] === "create") {

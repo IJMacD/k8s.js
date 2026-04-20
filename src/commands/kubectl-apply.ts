@@ -129,6 +129,7 @@ export async function* kubectlApply(
     namespace: string,
     state: AppState,
     dispatch: ActionDispatch<[action: Action]>,
+    stdin: string | null = null,
 ): AsyncGenerator<string> {
     // Parse -f / --filename
     let filename: string | undefined;
@@ -141,8 +142,15 @@ export async function* kubectlApply(
     }
     if (!filename) throw Error("kubectl apply: -f <file> is required");
 
-    const content = readFile(filename);
-    if (content === undefined) throw Error(`kubectl apply: cannot read file: ${filename}`);
+    let content: string;
+    if (filename === "-") {
+        if (stdin == null) throw Error("kubectl apply: use a heredoc to pipe YAML to stdin (e.g. kubectl apply -f - <<EOF ... EOF)");
+        content = stdin;
+    } else {
+        const fileContent = readFile(filename);
+        if (fileContent === undefined) throw Error(`kubectl apply: cannot read file: ${filename}`);
+        content = fileContent;
+    }
 
     const { loadAll } = await import("js-yaml");
     const docs: unknown[] = [];
