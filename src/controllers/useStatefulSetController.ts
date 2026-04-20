@@ -22,6 +22,7 @@ export function useStatefulSetController(
 ) {
     const { StatefulSets, Pods, PersistentVolumeClaims } = state;
     const pvcCreatedRef = useRef<Set<string>>(new Set());
+    const pvcSeenRef = useRef<Set<string>>(new Set());
 
     useEffect(() => {
         const timers: ReturnType<typeof setTimeout>[] = [];
@@ -71,6 +72,14 @@ export function useStatefulSetController(
                     const alreadyExists = PersistentVolumeClaims.some(
                         c => c.metadata.name === claimName && c.metadata.namespace === namespace,
                     );
+                    if (alreadyExists) {
+                        // Track that this PVC has been observed in state
+                        pvcSeenRef.current.add(pvcKey);
+                    } else if (pvcSeenRef.current.has(pvcKey)) {
+                        // PVC previously existed but was deleted externally — allow recreation
+                        pvcCreatedRef.current.delete(pvcKey);
+                        pvcSeenRef.current.delete(pvcKey);
+                    }
                     if (!alreadyExists && !pvcCreatedRef.current.has(pvcKey)) {
                         pvcCreatedRef.current.add(pvcKey);
                         dispatch(createPersistentVolumeClaim(claimName, {
@@ -158,7 +167,8 @@ export function useStatefulSetController(
     // Clear pvcCreatedRef when the STS set changes to allow re-provision on re-mount
     useEffect(() => {
         const pvcCreated = pvcCreatedRef.current;
-        return () => { pvcCreated.clear(); };
+        const pvcSeen = pvcSeenRef.current;
+        return () => { pvcCreated.clear(); pvcSeen.clear(); };
     }, []);
 
     // Status rollup — separate effect with change-detection to avoid cancelling timers above.
