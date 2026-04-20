@@ -15,6 +15,7 @@ interface EditorProps {
 export function Editor({ state, dispatch, initialContent, namespace, onClose }: EditorProps) {
   const [content, setContent] = useState(initialContent);
   const [output, setOutput] = useState<string[]>([]);
+  const [isErrorOutput, setIsErrorOutput] = useState(false);
   const [applying, setApplying] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const outputRef = useRef<HTMLDivElement>(null);
@@ -41,10 +42,13 @@ export function Editor({ state, dispatch, initialContent, namespace, onClose }: 
     }
     setApplying(true);
     setOutput([]);
+    setIsErrorOutput(false);
+    let errorOccurred = false;
     try {
       writeFile('_editor.yaml', content);
       const lines: string[] = [];
       for await (const line of kubectlApply(['-f', '_editor.yaml'], namespace, state, dispatch)) {
+        if (line.startsWith('error') || line.startsWith('Error')) errorOccurred = true;
         lines.push(line);
         setOutput([...lines]);
         // Scroll output into view
@@ -55,10 +59,14 @@ export function Editor({ state, dispatch, initialContent, namespace, onClose }: 
         }, 0);
       }
     } catch (err) {
+      errorOccurred = true;
       setOutput([String(err instanceof Error ? err.message : err)]);
     } finally {
+      setIsErrorOutput(errorOccurred);
       setApplying(false);
-      hideTimerRef.current = setTimeout(() => setOutput([]), 3000);
+      if (!errorOccurred) {
+        hideTimerRef.current = setTimeout(() => setOutput([]), 3000);
+      }
     }
   }
 
@@ -118,21 +126,34 @@ export function Editor({ state, dispatch, initialContent, namespace, onClose }: 
 
       {/* Output zone */}
       {output.length > 0 && (
-        <div
-          ref={outputRef}
-          style={{
-            flexShrink: 0,
-            maxHeight: '80px',
-            overflowY: 'auto',
-            padding: '4px 12px',
-            backgroundColor: '#141414',
-          }}
-        >
-          {output.map((line, i) => (
-            <div key={i} style={{ color: line.startsWith('error') || line.startsWith('kubectl') ? '#f87171' : '#86efac', fontSize: '12px', lineHeight: '1.6' }}>
-              {line}
-            </div>
-          ))}
+        <div style={{ flexShrink: 0, position: 'relative', backgroundColor: '#141414' }}>
+          {isErrorOutput && (
+            <button
+              onClick={() => { setOutput([]); setIsErrorOutput(false); }}
+              title="Dismiss"
+              style={{
+                position: 'absolute', top: '4px', right: '6px', zIndex: 1,
+                background: 'none', border: 'none', color: '#888',
+                cursor: 'pointer', fontSize: '11px', padding: '0 2px', lineHeight: 1,
+              }}
+            >
+              ✕
+            </button>
+          )}
+          <div
+            ref={outputRef}
+            style={{
+              maxHeight: '80px',
+              overflowY: 'auto',
+              padding: isErrorOutput ? '4px 22px 4px 12px' : '4px 12px',
+            }}
+          >
+            {output.map((line, i) => (
+              <div key={i} style={{ color: isErrorOutput ? '#f87171' : '#86efac', fontSize: '12px', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+                {line}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
