@@ -18,4 +18,5 @@ export const kindAliases: Record<string, string> = {
     secrets: "secret", secret: "secret",
     persistentvolumes: "persistentvolume", persistentvolume: "persistentvolume", pv: "persistentvolume",
     persistentvolumeclaims: "persistentvolumeclaim", persistentvolumeclaim: "persistentvolumeclaim", pvc: "persistentvolumeclaim",
+    storageclasses: "storageclass", storageclass: "storageclass", sc: "storageclass",
 };

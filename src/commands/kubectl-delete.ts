@@ -7,6 +7,7 @@ import {
     deleteJob,
     deletePersistentVolume,
     deletePersistentVolumeClaim,
+    deleteStorageClass,
     deletePod,
     deleteReplicaSet,
     deleteSecret,
@@ -65,6 +66,7 @@ export async function* kubectlDelete(
             case "secret": names = state.Secrets.filter(s => s.metadata.namespace === namespace).map(s => s.metadata.name); break;
             case "persistentvolume": names = state.PersistentVolumes.map(pv => pv.metadata.name); break;
             case "persistentvolumeclaim": names = state.PersistentVolumeClaims.filter(pvc => pvc.metadata.namespace === namespace).map(pvc => pvc.metadata.name); break;
+            case "storageclass": names = state.StorageClasses.map(sc => sc.metadata.name); break;
         }
     }
 
@@ -162,6 +164,13 @@ export async function* kubectlDelete(
                 if (!pvc) throw Error(`Error from server (NotFound): persistentvolumeclaims "${name}" not found`);
                 dispatch(deletePersistentVolumeClaim(name, namespace));
                 lines.push(`persistentvolumeclaim "${name}" deleted`);
+                break;
+            }
+            case "storageclass": {
+                const sc = state.StorageClasses.find(s => s.metadata.name === name);
+                if (!sc) throw Error(`Error from server (NotFound): storageclasses "${name}" not found`);
+                dispatch(deleteStorageClass(name));
+                lines.push(`storageclass.storage.k8s.io "${name}" deleted`);
                 break;
             }
         }

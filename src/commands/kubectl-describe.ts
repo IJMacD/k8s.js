@@ -798,5 +798,25 @@ export async function* kubectlDescribe(
         yield lines.join("\n"); return;
     }
 
+    if (resourceArg.startsWith("storageclass/") || resourceArg.startsWith("sc/") || args[1] === "storageclass" || args[1] === "storageclasses" || args[1] === "sc") {
+        const name = resolveName();
+        if (!name) throw Error("kubectl describe storageclass: missing name");
+        const sc = state.StorageClasses.find(s => s.metadata.name === name);
+        if (!sc) throw Error(`Error from server (NotFound): storageclasses "${name}" not found`);
+        const lines = [
+            `Name:                  ${sc.metadata.name}`,
+            `IsDefaultClass:        ${sc.metadata.annotations["storageclass.kubernetes.io/is-default-class"] === "true" ? "Yes" : "No"}`,
+            `Annotations:           ${Object.entries(sc.metadata.annotations ?? {}).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
+            `Provisioner:           ${sc.provisioner}`,
+            `Parameters:            ${sc.parameters ? Object.entries(sc.parameters).map(([k, v]) => `${k}=${v}`).join(",") : "<none>"}`,
+            `AllowVolumeExpansion:  ${sc.allowVolumeExpansion ?? false}`,
+            `MountOptions:          <none>`,
+            `ReclaimPolicy:         ${sc.reclaimPolicy}`,
+            `VolumeBindingMode:     ${sc.volumeBindingMode}`,
+            `Events:                <none>`,
+        ];
+        yield lines.join("\n"); return;
+    }
+
     throw Error(`kubectl describe: unsupported resource type "${resourceArg.split("/")[0]}"`);
 }

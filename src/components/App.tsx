@@ -5,6 +5,7 @@ import type { ConsoleHandle } from './Console'
 import { Browser } from './Browser'
 import { Editor } from './Editor'
 import { reducer, resetState, type AppState } from '../store/store';
+import type { StorageClass } from '../types/storage/v1/StorageClass';
 import { shell } from '../commands/command';
 import { writeFile } from '../commands/helpers/filesystem';
 import { ResourceTabs } from './ResourceTabs';
@@ -19,6 +20,7 @@ import { useDaemonSetController } from '../controllers/useDaemonSetController'
 import { useStatefulSetController } from '../controllers/useStatefulSetController';
 import { useServiceController } from '../controllers/useServiceController';
 import { usePVCBinder } from '../controllers/usePVCBinder';
+import { useLocalPathProvisioner } from '../controllers/useLocalPathProvisioner';
 const STORAGE_KEY = 'k8s-apiserver';
 
 function makeInitialState(): AppState {
@@ -62,6 +64,15 @@ function makeInitialState(): AppState {
     Secrets: [],
     PersistentVolumes: [],
     PersistentVolumeClaims: [],
+    StorageClasses: [
+      {
+        metadata: { uid: crypto.randomUUID(), name: 'local-path', labels: {}, annotations: {}, creationTimestamp: now },
+        provisioner: 'local-path-provisioner',
+        reclaimPolicy: 'Delete',
+        volumeBindingMode: 'WaitForFirstConsumer',
+        allowVolumeExpansion: true,
+      } satisfies StorageClass,
+    ],
   };
 }
 
@@ -88,6 +99,7 @@ function App() {
   useStatefulSetController(store, dispatch);
   useServiceController(store, dispatch);
   usePVCBinder(store, dispatch);
+  useLocalPathProvisioner(store, dispatch);
 
   useEffect(() => {
     try {

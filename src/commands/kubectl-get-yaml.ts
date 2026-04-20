@@ -17,6 +17,7 @@ const kindMeta: Record<string, { apiVersion: string; kind: string }> = {
     secret: { apiVersion: "v1", kind: "Secret" },
     persistentvolume: { apiVersion: "v1", kind: "PersistentVolume" },
     persistentvolumeclaim: { apiVersion: "v1", kind: "PersistentVolumeClaim" },
+    storageclass: { apiVersion: "storage.k8s.io/v1", kind: "StorageClass" },
 };
 
 
@@ -65,6 +66,7 @@ function collect(
             }));
         case "persistentvolume": return state.PersistentVolumes.filter(pv => name === undefined || pv.metadata.name === name);
         case "persistentvolumeclaim": return state.PersistentVolumeClaims.filter(pvc => inNs(pvc.metadata.namespace) && (name === undefined || pvc.metadata.name === name));
+        case "storageclass": return state.StorageClasses.filter(sc => name === undefined || sc.metadata.name === name);
         default:            return [];
     }
 }
@@ -111,6 +113,10 @@ export async function* kubectlGetYaml(
         entries[0].name = cleanArgs[2];
     }
 
+    if (entries.length === 1 && entries[0].type === "storageclass") {
+        // StorageClass is cluster-scoped — treat like PV, not like a namespaced resource
+    }
+
     // "kubectl get all -o yaml/json"
     if (entries.length === 1 && entries[0].type === "all") {
         const allKinds = ["pod", "service", "endpoints", "daemonset", "statefulset", "replicaset", "deployment", "job", "cronjob"];
@@ -135,6 +141,7 @@ export async function* kubectlGetYaml(
                 endpoints: "endpoints", node: "nodes", job: "jobs", cronjob: "cronjobs",
                 configmap: "configmaps", secret: "secrets",
                 persistentvolume: "persistentvolumes", persistentvolumeclaim: "persistentvolumeclaims",
+                storageclass: "storageclasses",
             };
             throw Error(`Error from server (NotFound): ${pluralMap[kind] ?? kind} "${name}" not found`);
         }

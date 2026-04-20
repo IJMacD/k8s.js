@@ -11,6 +11,7 @@ import type { ConfigMap } from "../types/v1/ConfigMap";
 import type { Secret } from "../types/v1/Secret";
 import type { PersistentVolume } from "../types/v1/PersistentVolume";
 import type { PersistentVolumeClaim } from "../types/v1/PersistentVolumeClaim";
+import type { StorageClass } from "../types/storage/v1/StorageClass";
 
 export interface AppState {
     Deployments: Deployment[];
@@ -27,6 +28,7 @@ export interface AppState {
     Secrets: Secret[];
     PersistentVolumes: PersistentVolume[];
     PersistentVolumeClaims: PersistentVolumeClaim[];
+    StorageClasses: StorageClass[];
 }
 
 const CreateDeploymentType = "CREATE_DEPLOYMENT";
@@ -72,6 +74,8 @@ const DeletePVType = "DELETE_PV";
 const CreatePVCType = "CREATE_PVC";
 const DeletePVCType = "DELETE_PVC";
 const BindPVCType = "BIND_PVC";
+const CreateStorageClassType = "CREATE_STORAGECLASS";
+const DeleteStorageClassType = "DELETE_STORAGECLASS";
 
 export type ActionType =
     | typeof CreateDeploymentType
@@ -116,7 +120,9 @@ export type ActionType =
     | typeof DeletePVType
     | typeof CreatePVCType
     | typeof DeletePVCType
-    | typeof BindPVCType;
+    | typeof BindPVCType
+    | typeof CreateStorageClassType
+    | typeof DeleteStorageClassType;
 
 export interface CreateDeploymentAction {
     type: typeof CreateDeploymentType;
@@ -349,7 +355,9 @@ export type Action =
     | { type: typeof DeletePVType; payload: { name: string } }
     | CreatePVCAction
     | { type: typeof DeletePVCType; payload: { name: string; namespace: string } }
-    | { type: typeof BindPVCType; payload: { pvcName: string; pvcNamespace: string; pvName: string } };
+    | { type: typeof BindPVCType; payload: { pvcName: string; pvcNamespace: string; pvName: string } }
+    | { type: typeof CreateStorageClassType; payload: StorageClass }
+    | { type: typeof DeleteStorageClassType; payload: { name: string } };
 
 export function deleteDeployment(name: string, namespace = "default") {
     return { type: DeleteDeploymentType as typeof DeleteDeploymentType, payload: { name, namespace } };
@@ -530,6 +538,30 @@ export function deletePersistentVolumeClaim(name: string, namespace = "default")
 
 export function bindPVC(pvcName: string, pvcNamespace: string, pvName: string) {
     return { type: BindPVCType as typeof BindPVCType, payload: { pvcName, pvcNamespace, pvName } };
+}
+
+export function createStorageClass(
+    name: string,
+    spec: Omit<StorageClass, "metadata"> & { labels?: Record<string, string>; annotations?: Record<string, string> },
+): { type: typeof CreateStorageClassType; payload: StorageClass } {
+    const { labels, annotations, ...rest } = spec;
+    return {
+        type: CreateStorageClassType,
+        payload: {
+            metadata: {
+                uid: crypto.randomUUID(),
+                name,
+                labels: labels ?? {},
+                annotations: annotations ?? {},
+                creationTimestamp: new Date().toISOString(),
+            },
+            ...rest,
+        },
+    };
+}
+
+export function deleteStorageClass(name: string) {
+    return { type: DeleteStorageClassType as typeof DeleteStorageClassType, payload: { name } };
 }
 
 export function scaleStatefulSet(name: string, replicas: number, namespace = "default") {
@@ -1404,6 +1436,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
             case "secret": return { ...state, Secrets: state.Secrets.map(r => match(r) ? apply(r) : r) };
             case "persistentvolume": return { ...state, PersistentVolumes: state.PersistentVolumes.map(r => match(r) ? apply(r) : r) };
             case "persistentvolumeclaim": return { ...state, PersistentVolumeClaims: state.PersistentVolumeClaims.map(r => match(r) ? apply(r) : r) };
+            case "storageclass": return { ...state, StorageClasses: state.StorageClasses.map(r => match(r) ? apply(r) : r) };
         }
     }
     if (action.type === CreateConfigMapType) {
@@ -1578,6 +1611,15 @@ export const reducer = (state: AppState, action: Action): AppState => {
                     },
                 }
             ),
+        };
+    }
+    if (action.type === CreateStorageClassType) {
+        return { ...state, StorageClasses: [...state.StorageClasses, action.payload] };
+    }
+    if (action.type === DeleteStorageClassType) {
+        return {
+            ...state,
+            StorageClasses: state.StorageClasses.filter(sc => sc.metadata.name !== action.payload.name),
         };
     }
     if (action.type === ResetStateType) {

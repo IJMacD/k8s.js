@@ -11,6 +11,7 @@ import {
     createSecret,
     createService,
     createStatefulSet,
+    createStorageClass,
     patchResource,
     type Action,
     type AppState,
@@ -357,6 +358,35 @@ export async function* kubectlApply(
                 } else {
                     dispatch(patchResource("persistentvolumeclaim", name, { spec }, docNs));
                     yield `persistentvolumeclaim/${name} configured`;
+                }
+                break;
+            }
+            case "storageclass": {
+                const provisioner = typeof r.provisioner === "string" ? r.provisioner : "";
+                if (!provisioner) throw Error(`kubectl apply: StorageClass "${name}": provisioner is required`);
+                const reclaimPolicy = (typeof spec?.reclaimPolicy === "string" ? spec.reclaimPolicy
+                    : typeof r.reclaimPolicy === "string" ? r.reclaimPolicy
+                    : "Delete") as "Retain" | "Delete";
+                const volumeBindingMode = (typeof spec?.volumeBindingMode === "string" ? spec.volumeBindingMode
+                    : typeof r.volumeBindingMode === "string" ? r.volumeBindingMode
+                    : "Immediate") as "Immediate" | "WaitForFirstConsumer";
+                const allowVolumeExpansion = typeof r.allowVolumeExpansion === "boolean" ? r.allowVolumeExpansion : undefined;
+                const parameters = (typeof r.parameters === "object" && r.parameters !== null
+                    ? r.parameters : undefined) as Record<string, string> | undefined;
+                const labels = (meta?.labels ?? {}) as Record<string, string>;
+                const annotations = (meta?.annotations ?? {}) as Record<string, string>;
+                if (!state.StorageClasses.some(sc => sc.metadata.name === name)) {
+                    dispatch(createStorageClass(name, {
+                        provisioner, reclaimPolicy, volumeBindingMode,
+                        ...(allowVolumeExpansion !== undefined ? { allowVolumeExpansion } : {}),
+                        ...(parameters !== undefined ? { parameters } : {}),
+                        labels,
+                        annotations,
+                    }));
+                    yield `storageclass.storage.k8s.io/${name} created`;
+                } else {
+                    dispatch(patchResource("storageclass", name, { provisioner, reclaimPolicy, volumeBindingMode, allowVolumeExpansion, parameters }, docNs));
+                    yield `storageclass.storage.k8s.io/${name} configured`;
                 }
                 break;
             }

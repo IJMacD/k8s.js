@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { ActionDispatch } from "react";
 import type { AppState, Action } from "../store/store";
-import { bindPodToNode } from "../store/store";
+import { bindPodToNode, patchResource } from "../store/store";
 import type { Pod } from "../types/v1/Pod";
 import type { KubeNode } from "../types/v1/Node";
 import type { NodeSelectorRequirement } from "../types/v1/PersistentVolume";
@@ -98,6 +98,7 @@ export function useScheduler(
 ) {
     const { Pods, Nodes, PersistentVolumeClaims, PersistentVolumes } = state;
     const scheduledRef = useRef<Set<string>>(new Set());
+    const wfcAnnotatedRef = useRef<Set<string>>(new Set());
     const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
     useEffect(() => {
@@ -133,8 +134,10 @@ export function useScheduler(
                 : readyNodes;
 
             // ---------------------------------------------------------------
-            // PVC constraint 1: All PVC volumes must be already Bound.
-            // If any referenced PVC is still Pending/Lost, skip this pod.
+            // PVC constraint 1: All PVC volumes must be Bound before scheduling.
+            // Exception: WaitForFirstConsumer PVCs (storageClassName "local-path")
+            // get a selected-node annotation so the provisioner can pin the PV
+            // to the right node. The pod stays Pending until the PVC is bound.
             // ---------------------------------------------------------------
             const pvClaimNames = (pod.spec.volumes ?? []).flatMap(v =>
                 v.persistentVolumeClaim ? [v.persistentVolumeClaim.claimName] : []
@@ -144,7 +147,46 @@ export function useScheduler(
                     c => c.metadata.name === cn && c.metadata.namespace === pod.metadata.namespace
                 )
             );
-            if (pvcRefs.some(c => !c || c.status.phase !== "Bound")) continue;
+            const unboundPVCs = pvcRefs.filter(c => !c || c.status.phase !== "Bound");
+            if (unboundPVCs.length > 0) {
+                // Any non-WFC unbound PVC → pod cannot be scheduled
+                const allWFC = unboundPVCs.every(c => c?.spec.storageClassName === "local-path");
+                if (!allWFC) continue;
+
+                // All unbound PVCs are WFC. Stamp selected-node on those not yet annotated.
+                const needsAnnotation = (unboundPVCs as NonNullable<typeof pvcRefs[number]>[])
+                    .filter(c => !c.metadata.annotations["volume.kubernetes.io/selected-node"]
+                        && !wfcAnnotatedRef.current.has(c.metadata.uid));
+
+                if (needsAnnotation.length > 0) {
+                    const reqCPU = podTotalCPU(pod);
+                    const reqMemory = podTotalMemory(pod);
+                    const wfcEligible = selectorFiltered.filter(n =>
+                        nodeRemainingCPU(n, Pods) >= reqCPU &&
+                        nodeRemainingMemory(n, Pods) >= reqMemory,
+                    );
+                    if (wfcEligible.length > 0) {
+                        const ownerUid = pod.metadata.ownerReferences?.[0]?.uid ?? null;
+                        const wfcScore = (node: KubeNode) => {
+                            const nodePods = Pods.filter(p => p.spec.nodeName === node.metadata.name);
+                            const spreadCount = ownerUid
+                                ? nodePods.filter(p => p.metadata.ownerReferences?.[0]?.uid === ownerUid).length
+                                : 0;
+                            return spreadCount * 1000 + nodePods.length;
+                        };
+                        const wfcChosen = wfcEligible.reduce((best, n) =>
+                            wfcScore(n) < wfcScore(best) ? n : best,
+                        );
+                        for (const pvc of needsAnnotation) {
+                            wfcAnnotatedRef.current.add(pvc.metadata.uid);
+                            dispatch(patchResource("persistentvolumeclaim", pvc.metadata.name, {
+                                metadata: { annotations: { "volume.kubernetes.io/selected-node": wfcChosen.metadata.name } },
+                            }, pvc.metadata.namespace));
+                        }
+                    }
+                }
+                continue; // Wait for PVC to be provisioned and bound
+            }
 
             // ---------------------------------------------------------------
             // PVC constraint 2: nodeAffinity from bound PVs must be satisfied.
@@ -267,9 +309,11 @@ export function useScheduler(
     useEffect(() => {
         const timers = timersRef.current;
         const scheduled = scheduledRef.current;
+        const wfcAnnotated = wfcAnnotatedRef.current;
         return () => {
             timers.forEach(clearTimeout);
             scheduled.clear();
+            wfcAnnotated.clear();
         };
     }, []);
 }

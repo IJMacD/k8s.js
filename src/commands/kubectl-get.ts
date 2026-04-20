@@ -389,6 +389,24 @@ export async function* kubectlGet(
             ]);
             return fmtTable(headers, rows);
         }
+        if (type === "storageclasses" || type === "storageclass" || type === "sc") {
+            // StorageClasses are cluster-scoped — ignore namespace / --all-namespaces
+            const items = state.StorageClasses.filter(
+                sc => (name === undefined || sc.metadata.name === name) && matchSelector(sc.metadata.labels),
+            );
+            if (name && items.length === 0)
+                throw Error(`Error from server (NotFound): storageclasses "${name}" not found`);
+            const headers = ["NAME", "PROVISIONER", "RECLAIMPOLICY", "VOLUMEBINDINGMODE", "ALLOWVOLUMEEXPANSION", "AGE"];
+            const rows = items.map(sc => [
+                sc.metadata.name,
+                sc.provisioner,
+                sc.reclaimPolicy,
+                sc.volumeBindingMode,
+                String(sc.allowVolumeExpansion ?? false),
+                ageStr(sc.metadata.creationTimestamp),
+            ]);
+            return fmtTable(headers, rows);
+        }
         if (type === "all") {
             const kinds: Array<[string, string]> = [
                 ["pods", "pod.v1"],
