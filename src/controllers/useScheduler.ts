@@ -204,6 +204,9 @@ export function useScheduler(
             // ---------------------------------------------------------------
             // PVC constraint 2: nodeAffinity from bound PVs must be satisfied.
             // ---------------------------------------------------------------
+            // blockReason tracks why affinityFiltered was reduced to [] so we
+            // can emit the correct FailedScheduling message below.
+            let blockReason: string | null = null;
             let affinityFiltered = selectorFiltered;
             for (const pvc of pvcRefs as NonNullable<typeof pvcRefs[number]>[]) {
                 const pvName = pvc.status.boundVolume;
@@ -250,6 +253,7 @@ export function useScheduler(
                         )
                     );
                     if (inUse) {
+                        blockReason = `0/${readyNodes.length} nodes are available: 1 pod already uses PersistentVolumeClaim "${pvc.metadata.name}" with access mode ReadWriteOncePod.`;
                         affinityFiltered = [];
                         break;
                     }
@@ -271,6 +275,9 @@ export function useScheduler(
                     )?.spec.nodeName;
                     if (pinnedNode) {
                         affinityFiltered = affinityFiltered.filter(n => n.metadata.name === pinnedNode);
+                        if (affinityFiltered.length === 0) {
+                            blockReason = `0/${readyNodes.length} nodes are available: volume "${pvc.metadata.name}" is already in use by another pod via ReadWriteOnce — no eligible node matches.`;
+                        }
                     }
                 }
             }
@@ -284,10 +291,12 @@ export function useScheduler(
             );
 
             if (eligibleNodes.length === 0) {
-                // Determine the most specific failure reason
-                const affinityBlocked = affinityFiltered.length === 0;
+                // Determine the most specific failure reason.
+                // Priority: explicit blockReason (RWOP/RWO) > PV nodeAffinity > resource exhaustion.
                 let failMsg: string;
-                if (affinityBlocked) {
+                if (blockReason) {
+                    failMsg = blockReason;
+                } else if (affinityFiltered.length === 0) {
                     // Find the PV whose nodeAffinity blocked all nodes
                     const blockingPV = (() => {
                         let remaining = selectorFiltered;
