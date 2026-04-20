@@ -1,5 +1,6 @@
 import type { AppState } from "../store/store";
 import { kubectlGetYaml } from "./kubectl-get-yaml";
+import { kindAliases } from "./helpers/resource-types";
 
 export async function* kubectlGet(
     args: string[],
@@ -71,12 +72,14 @@ export async function* kubectlGet(
     const resourceToken = args[1];
     if (!resourceToken) throw Error("kubectl get: you must specify the type of resource to get");
 
-    // Parse comma-separated list; each entry may use resource/name notation
+    // Parse comma-separated list; each entry may use resource/name notation.
+    // Resolve aliases via kindAliases so that e.g. "deploy" → "deployment".
     const entries = resourceToken.split(",").filter(Boolean).map(entry => {
         const slash = entry.indexOf("/");
-        return slash >= 0
-            ? { type: entry.slice(0, slash).toLowerCase(), name: entry.slice(slash + 1) }
-            : { type: entry.toLowerCase(), name: undefined as string | undefined };
+        const rawType = slash >= 0 ? entry.slice(0, slash).toLowerCase() : entry.toLowerCase();
+        const type = kindAliases[rawType] ?? rawType; // preserve "all" and other specials
+        const name = slash >= 0 ? entry.slice(slash + 1) : undefined as string | undefined;
+        return { type, name };
     });
     // For a single resource without slash, "kubectl get pods <name>" uses args[2] as the name
     // but only when it isn't a flag (e.g. -l)

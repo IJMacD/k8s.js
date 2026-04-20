@@ -6,6 +6,7 @@ import {
     type Action,
     type AppState,
 } from "../store/store";
+import { kindAliases } from "./helpers/resource-types";
 
 // ---------------------------------------------------------------------------
 // Types & helpers
@@ -19,11 +20,13 @@ function isWorkloadKind(k: string): k is WorkloadKind {
     return (WORKLOAD_KINDS as string[]).includes(k);
 }
 
-/** e.g. `deployment/my-app` → `{ kind: "deployment", name: "my-app" }` */
+/** e.g. `deploy/my-app` → `{ kind: "deployment", name: "my-app" }` */
 function parseResourceArg(arg: string): { kind: string; name: string } | null {
     const slash = arg.indexOf("/");
     if (slash === -1) return null;
-    return { kind: arg.slice(0, slash).toLowerCase(), name: arg.slice(slash + 1) };
+    const rawKind = arg.slice(0, slash).toLowerCase();
+    const kind = kindAliases[rawKind] ?? rawKind;
+    return { kind, name: arg.slice(slash + 1) };
 }
 
 /** Canonical resource string for CLI output (e.g. `deployment.apps`, `job.batch`). */
