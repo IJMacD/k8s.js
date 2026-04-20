@@ -4,6 +4,7 @@ import {
     type Action,
     type AppState,
 } from "../store/store";
+import { kindAliases } from "./helpers/resource-types";
 
 /**
  * Paths whose runtime values are free-key maps (Record<string, string>).
@@ -80,18 +81,7 @@ export async function* kubectlPatch(
     }
 
     // Normalise kind aliases
-    const kindMap: Record<string, string> = {
-        deployment: "deployment", deployments: "deployment", deploy: "deployment",
-        replicaset: "replicaset", replicasets: "replicaset", rs: "replicaset",
-        daemonset: "daemonset", daemonsets: "daemonset", ds: "daemonset",
-        statefulset: "statefulset", statefulsets: "statefulset", sts: "statefulset",
-        pod: "pod", pods: "pod", po: "pod",
-        service: "service", services: "service", svc: "service",
-        node: "node", nodes: "node",
-        job: "job", jobs: "job",
-        cronjob: "cronjob", cronjobs: "cronjob",
-    };
-    const resolvedKind = kindMap[kind.toLowerCase()];
+    const resolvedKind = kindAliases[kind.toLowerCase()];
     if (!resolvedKind) throw Error(`error: the server doesn't have a resource type "${kind}"`);
 
     // Only --type merge is supported

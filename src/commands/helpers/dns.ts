@@ -2,7 +2,7 @@
  * Shared in-cluster DNS resolution logic (simulates CoreDNS).
  * Used by nslookup, ping, and curl.
  */
-import type { AppState } from "../store/store";
+import type { AppState } from "../../store/store";
 
 export interface DnsRecord {
     name: string;        // FQDN that was resolved

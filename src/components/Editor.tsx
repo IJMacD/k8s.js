@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import type { ActionDispatch } from 'react';
 import type { Action, AppState } from '../store/store';
 import { kubectlApply } from '../commands/kubectl-apply';
-import { writeFile } from '../commands/filesystem';
+import { writeFile } from '../commands/helpers/filesystem';
 
 interface EditorProps {
   state: AppState;

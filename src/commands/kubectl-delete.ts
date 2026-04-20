@@ -15,6 +15,7 @@ import {
     type Action,
     type AppState,
 } from "../store/store";
+import { kindAliases } from "./helpers/resource-types";
 
 export async function* kubectlDelete(
     args: string[],
@@ -45,26 +46,7 @@ export async function* kubectlDelete(
         }
     }
 
-    const resolveType = (t: string) => {
-        switch (t) {
-            case "pod": case "pods": case "po": return "pod";
-            case "deployment": case "deployments": case "deploy": return "deployment";
-            case "replicaset": case "replicasets": case "rs": return "replicaset";
-            case "service": case "services": case "svc": return "service";
-            case "job": case "jobs": return "job";
-            case "cronjob": case "cronjobs": return "cronjob";
-            case "node": case "nodes": return "node";
-            case "daemonset": case "daemonsets": case "ds": return "daemonset";
-            case "statefulset": case "statefulsets": case "sts": return "statefulset";
-            case "configmap": case "configmaps": case "cm": return "configmap";
-            case "secret": case "secrets": return "secret";
-            case "persistentvolume": case "persistentvolumes": case "pv": return "persistentvolume";
-            case "persistentvolumeclaim": case "persistentvolumeclaims": case "pvc": return "persistentvolumeclaim";
-            default: return null;
-        }
-    };
-
-    const kind = resolveType(resourceType);
+    const kind = kindAliases[resourceType] ?? null;
     if (!kind) throw Error(`error: the server doesn't have a resource type "${resourceType}"`);
 
     // Collect names if --all

@@ -4,18 +4,7 @@ import {
     type Action,
     type AppState,
 } from "../store/store";
-
-const kindAliases: Record<string, string> = {
-    node: "node", nodes: "node",
-    pod: "pod", pods: "pod", po: "pod",
-    deployment: "deployment", deployments: "deployment", deploy: "deployment",
-    service: "service", services: "service", svc: "service",
-    replicaset: "replicaset", replicasets: "replicaset", rs: "replicaset",
-    daemonset: "daemonset", daemonsets: "daemonset", ds: "daemonset",
-    statefulset: "statefulset", statefulsets: "statefulset", sts: "statefulset",
-    job: "job", jobs: "job",
-    cronjob: "cronjob", cronjobs: "cronjob",
-};
+import { kindAliases } from "./helpers/resource-types";
 
 export async function* kubectlAnnotate(
     args: string[],

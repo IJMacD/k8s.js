@@ -1,5 +1,5 @@
 import type { AppState } from "../store/store";
-import { lookupClusterDNS } from "./dns";
+import { lookupClusterDNS } from "./helpers/dns";
 
 // Simulated in-cluster DNS resolver (CoreDNS at 10.96.0.10).
 const DNS_SERVER = "10.96.0.10";

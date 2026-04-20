@@ -4,7 +4,7 @@ import { kubectl } from "./kubectl";
 import { ping } from "./ping";
 import { curl } from "./curl";
 import { nslookup } from "./nslookup";
-import { listFiles, readFile, writeFile } from "./filesystem";
+import { listFiles, readFile, writeFile } from "./helpers/filesystem";
 
 /**
  * Splits a raw input line on the first unquoted `>`, returning the command

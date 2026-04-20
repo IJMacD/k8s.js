@@ -1,18 +1,6 @@
 import type { AppState } from "../store/store";
 import { kubectlGetYaml } from "./kubectl-get-yaml";
-
-const typeAliasMap: Record<string, string> = {
-    pods: "pod", pod: "pod", po: "pod",
-    deployments: "deployment", deployment: "deployment", deploy: "deployment",
-    replicasets: "replicaset", replicaset: "replicaset", rs: "replicaset",
-    daemonsets: "daemonset", daemonset: "daemonset", ds: "daemonset",
-    statefulsets: "statefulset", statefulset: "statefulset", sts: "statefulset",
-    services: "service", service: "service", svc: "service",
-    endpoints: "endpoints", endpoint: "endpoints", ep: "endpoints",
-    nodes: "node", node: "node",
-    jobs: "job", job: "job",
-    cronjobs: "cronjob", cronjob: "cronjob", cj: "cronjob",
-};
+import { kindAliases } from "./helpers/resource-types";
 
 export async function* kubectlEdit(
     args: string[],
@@ -42,7 +30,7 @@ export async function* kubectlEdit(
         throw Error(`kubectl edit: must specify a resource name`);
     }
 
-    const kind = typeAliasMap[type];
+    const kind = kindAliases[type];
     if (!kind) {
         throw Error(`error: the server doesn't have a resource type "${type}"`);
     }

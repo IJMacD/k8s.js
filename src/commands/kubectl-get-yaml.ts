@@ -1,4 +1,5 @@
 import type { AppState } from "../store/store";
+import { kindAliases } from "./helpers/resource-types";
 
 /** apiVersion + kind for every resource type this simulator knows about */
 const kindMeta: Record<string, { apiVersion: string; kind: string }> = {
@@ -18,22 +19,6 @@ const kindMeta: Record<string, { apiVersion: string; kind: string }> = {
     persistentvolumeclaim: { apiVersion: "v1", kind: "PersistentVolumeClaim" },
 };
 
-const typeAliasMap: Record<string, string> = {
-    pods: "pod", pod: "pod", po: "pod",
-    deployments: "deployment", deployment: "deployment", deploy: "deployment",
-    replicasets: "replicaset", replicaset: "replicaset", rs: "replicaset",
-    daemonsets: "daemonset", daemonset: "daemonset", ds: "daemonset",
-    statefulsets: "statefulset", statefulset: "statefulset", sts: "statefulset",
-    services: "service", service: "service", svc: "service",
-    endpoints: "endpoints", endpoint: "endpoints", ep: "endpoints",
-    nodes: "node", node: "node",
-    jobs: "job", job: "job",
-    cronjobs: "cronjob", cronjob: "cronjob", cj: "cronjob",
-    configmaps: "configmap", configmap: "configmap", cm: "configmap",
-    secrets: "secret", secret: "secret",
-    persistentvolumes: "persistentvolume", persistentvolume: "persistentvolume", pv: "persistentvolume",
-    persistentvolumeclaims: "persistentvolumeclaim", persistentvolumeclaim: "persistentvolumeclaim", pvc: "persistentvolumeclaim",
-};
 
 /** Prepend apiVersion + kind to an object and enforce real-kubectl key order */
 function annotate(kind: string, obj: object): object {
@@ -138,7 +123,7 @@ export async function* kubectlGetYaml(
 
     const allItems: object[] = [];
     for (const { type, name } of entries) {
-        const kind = typeAliasMap[type];
+        const kind = kindAliases[type];
         if (!kind) throw Error(`error: the server doesn't have a resource type "${type}"`);
 
         const items = collect(kind, name, namespace, allNamespaces, state);

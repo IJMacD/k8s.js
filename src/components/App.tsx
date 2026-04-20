@@ -6,7 +6,7 @@ import { Browser } from './Browser'
 import { Editor } from './Editor'
 import { reducer, resetState, type AppState } from '../store/store';
 import { shell } from '../commands/command';
-import { writeFile } from '../commands/filesystem';
+import { writeFile } from '../commands/helpers/filesystem';
 import { ResourceTabs } from './ResourceTabs';
 import { useDeploymentController } from '../controllers/useDeploymentController';
 import { useReplicaSetController } from '../controllers/useReplicaSetController';

@@ -16,7 +16,7 @@ import {
     type AppState,
 } from "../store/store";
 import type { AccessMode } from "../types/v1/PersistentVolume";
-import { readFile } from "./filesystem";
+import { readFile } from "./helpers/filesystem";
 
 /** Parse a raw containers/initContainers array, normalising types */
 function parseProbe(raw: unknown): Probe | undefined {

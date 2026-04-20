@@ -1,5 +1,5 @@
 import type { AppState } from "../store/store";
-import { lookupClusterDNS } from "./dns";
+import { lookupClusterDNS } from "./helpers/dns";
 
 const COUNT = 4;
 const INTERVAL_MS = 1000;
