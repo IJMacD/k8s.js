@@ -5,6 +5,7 @@ import {
     deleteDaemonSet,
     deleteDeployment,
     deleteJob,
+    deleteNode,
     deletePersistentVolume,
     deletePersistentVolumeClaim,
     deleteStorageClass,
@@ -135,6 +136,7 @@ export async function* kubectlDelete(
                 // Evict all pods on this node before removing
                 const nodePods = state.Pods.filter(p => p.spec.nodeName === name);
                 for (const pod of nodePods) dispatch(deletePod(pod.metadata.name, pod.metadata.namespace));
+                dispatch(deleteNode(name));
                 lines.push(`node "${name}" deleted`);
                 break;
             }

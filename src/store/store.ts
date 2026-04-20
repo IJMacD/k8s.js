@@ -44,6 +44,7 @@ const SetDeploymentImageType = "SET_DEPLOYMENT_IMAGE";
 const CreateServiceType = "CREATE_SERVICE";
 const UpdateEndpointsType = "UPDATE_ENDPOINTS";
 const CreateNodeType = "CREATE_NODE";
+const DeleteNodeType = "DELETE_NODE";
 const UpdateNodeSpecType = "UPDATE_NODE_SPEC";
 const BindPodToNodeType = "BIND_POD_TO_NODE";
 const CreateJobType = "CREATE_JOB";
@@ -91,6 +92,7 @@ export type ActionType =
     | typeof CreateServiceType
     | typeof UpdateEndpointsType
     | typeof CreateNodeType
+    | typeof DeleteNodeType
     | typeof UpdateNodeSpecType
     | typeof BindPodToNodeType
     | typeof CreateJobType
@@ -280,6 +282,15 @@ export function createNode(
     return { type: CreateNodeType, payload: { name, ...resources } };
 }
 
+export interface DeleteNodeAction {
+    type: typeof DeleteNodeType;
+    payload: { name: string };
+}
+
+export function deleteNode(name: string): DeleteNodeAction {
+    return { type: DeleteNodeType, payload: { name } };
+}
+
 export interface UpdateNodeSpecAction {
     type: typeof UpdateNodeSpecType;
     payload: { name: string; patch: Partial<import("../types/v1/Node").NodeSpec> };
@@ -333,6 +344,7 @@ export type Action =
     | CreateServiceAction
     | UpdateEndpointsAction
     | CreateNodeAction
+    | DeleteNodeAction
     | UpdateNodeSpecAction
     | BindPodToNodeAction
     | CreateJobAction
@@ -1206,6 +1218,9 @@ export const reducer = (state: AppState, action: Action): AppState => {
             },
         };
         return { ...state, Nodes: [...state.Nodes, node] };
+    }
+    if (action.type === DeleteNodeType) {
+        return { ...state, Nodes: state.Nodes.filter(n => n.metadata.name !== action.payload.name) };
     }
     if (action.type === UpdateNodeSpecType) {
         const { name, patch } = action.payload;
