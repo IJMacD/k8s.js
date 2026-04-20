@@ -4,6 +4,27 @@ import type { AppState, Action } from "../store/store";
 import { updatePodStatus, emitEvent } from "../store/store";
 
 /**
+ * In-memory registry of container images that each node has already pulled.
+ * Stored at module scope (not in Redux state) so it persists across re-renders
+ * but resets on page reload — matching real node image-cache semantics.
+ */
+const nodeImageCache = new Map<string, Set<string>>();
+
+/**
+ * Returns the simulated pull duration (ms) for an image on a given node.
+ * First request: 3–7 s random. Subsequent requests: 0 ms (already cached).
+ * Registers the image immediately so two pods scheduled to the same node
+ * at the same time don't both pay the pull cost for the same image.
+ */
+function acquireImage(nodeName: string, image: string): number {
+    if (!nodeImageCache.has(nodeName)) nodeImageCache.set(nodeName, new Set());
+    const cache = nodeImageCache.get(nodeName)!;
+    if (cache.has(image)) return 0;
+    cache.add(image);
+    return 3_000 + Math.floor(Math.random() * 4_001); // 3–7 s
+}
+
+/**
  * Simulates the Kubernetes kubelet.
  * Watches Pods and drives each one through its lifecycle:
  *
@@ -57,6 +78,17 @@ export function useKubelet(
 
             const node = Nodes.find(n => n.metadata.name === pod.spec.nodeName);
 
+            // ── Image pull delays (CRI-level; not stored in the API server state) ──────
+            // Computed once per pod (scheduledRef guard ensures this runs only once).
+            // Init container images are pulled before init containers run;
+            // app container images are pulled per-container, sequentially.
+            const nodeName       = pod.spec.nodeName!;
+            const initPullDelays = hasInitialized
+                ? (initContainers.map(() => 0))
+                : initContainers.map(ic => acquireImage(nodeName, ic.image ?? ""));
+            const appPullDelays  = appContainers.map(c => acquireImage(nodeName, c.image ?? ""));
+            const totalInitPull  = initPullDelays.reduce((s, d) => s + d, 0);
+
             // How many init containers have already completed?
             const doneInitCount = (pod.status.initContainerStatuses ?? [])
                 .filter(s => s.state?.terminated !== undefined).length;
@@ -69,9 +101,9 @@ export function useKubelet(
 
             // ── Base delays from "now" (time this effect runs) ──────────────
             const scheduledDelay   = hasScheduled ? 0 : 1_000;
-            // Initialized fires: scheduledDelay + max(1 s, remainingInit * 2 s)
+            // Initialized fires: scheduledDelay + init image pull time + max(1 s, remainingInit * 2 s)
             const initGap          = Math.max(1_000, remainingInit * 2_000);
-            const initializedDelay = hasInitialized ? 0 : scheduledDelay + initGap;
+            const initializedDelay = hasInitialized ? 0 : scheduledDelay + totalInitPull + initGap;
 
             // ── PodScheduled ─────────────────────────────────────────────────
             if (!hasScheduled) {
@@ -94,6 +126,28 @@ export function useKubelet(
                         } : {}),
                     }));
                 }, scheduledDelay));
+            }
+
+            // ── Init container image pulls ───────────────────────────────────────────
+            // Fire Pulling/Pulled events for init container images that are new to this node.
+            // These events happen between PodScheduled and the first init container running.
+            if (!hasInitialized && totalInitPull > 0) {
+                let pullOffset = scheduledDelay;
+                for (let j = 0; j < initContainers.length; j++) {
+                    const pd = initPullDelays[j];
+                    if (pd === 0) continue;
+                    const ic  = initContainers[j];
+                    const obj = { kind: "Pod" as const, name, namespace };
+                    const ps  = pullOffset;
+                    timersRef.current.push(setTimeout(() => {
+                        dispatch(emitEvent(obj, "Pulling", `Pulling image "${ic.image}"`, "Normal"));
+                    }, ps));
+                    timersRef.current.push(setTimeout(() => {
+                        dispatch(emitEvent(obj, "Pulled",
+                            `Successfully pulled image "${ic.image}" in ${(pd / 1000).toFixed(1)}s`, "Normal"));
+                    }, ps + pd));
+                    pullOffset += pd;
+                }
             }
 
             // ── initContainer completions + Initialized ──────────────────────
@@ -192,11 +246,18 @@ export function useKubelet(
             }
 
             // ── Per-container Running transitions ────────────────────────────
-            // Each container gets TWO timers:
+            // Each container gets pull timers + TWO lifecycle timers:
             //   runningAt  → container is Running but NOT yet ready (shows orange in UI)
             //   readyAt    → container becomes Ready (shows green)
-            // The gap between them is at least MIN_RUNNING_BEFORE_READY so orange is always visible.
+            // Containers are processed sequentially: container[j+1]'s pull starts
+            // 1 s after container[j]'s pull ends, ensuring status updates always
+            // fire in ascending containerIndex order.
             const MIN_RUNNING_BEFORE_READY = 1_000;
+
+            // pullCursor: earliest time the next container can start its image pull.
+            // Starts at initializedDelay; advances by (pullDelay + 1_000) per container
+            // so the natural j*1_000 container spacing is preserved when all images are cached.
+            let pullCursor = initializedDelay;
 
             for (let j = 0; j < remainingApp; j++) {
                 const containerIndex  = readyContainerCount + j;
@@ -206,8 +267,33 @@ export function useKubelet(
                     (container.startupProbe?.initialDelaySeconds ?? 0) +
                     (container.readinessProbe?.initialDelaySeconds ?? 0)
                 ) * 1_000;
-                const runningAt = initializedDelay + 1_500 + j * 1_000;
-                const readyAt   = runningAt + Math.max(probeDelay, MIN_RUNNING_BEFORE_READY);
+                const pullDelay  = appPullDelays[containerIndex] ?? 0;
+                const pullStartAt = pullCursor;
+                const pullEndAt   = pullStartAt + pullDelay;
+                const runningAt   = pullEndAt + 1_500;
+                const readyAt     = runningAt + Math.max(probeDelay, MIN_RUNNING_BEFORE_READY);
+                // Advance cursor: next container's pull starts 1 s after this pull ends
+                pullCursor = pullEndAt + 1_000;
+
+                // Pulling event (only when image is new to this node)
+                if (pullDelay > 0) {
+                    const obj = { kind: "Pod" as const, name, namespace };
+                    timersRef.current.push(setTimeout(() => {
+                        dispatch(emitEvent(obj, "Pulling", `Pulling image "${container.image}"`, "Normal"));
+                    }, pullStartAt));
+                }
+
+                // Pulled event
+                {
+                    const obj = { kind: "Pod" as const, name, namespace };
+                    timersRef.current.push(setTimeout(() => {
+                        dispatch(emitEvent(obj, "Pulled",
+                            pullDelay > 0
+                                ? `Successfully pulled image "${container.image}" in ${(pullDelay / 1000).toFixed(1)}s`
+                                : `Container image "${container.image}" already present on machine`,
+                            "Normal"));
+                    }, pullEndAt));
+                }
 
                 // Timer 1: container starts Running but is not yet ready → orange square.
                 // When the first app container starts, also promote phase→Running and assign the pod IP.
@@ -284,14 +370,6 @@ export function useKubelet(
                             containerStatuses: newContainerStatuses,
                         }));
 
-                        // Emit kubelet events for each container
-                        for (const c of appContainers) {
-                            const obj = { kind: "Pod", name, namespace };
-                            dispatch(emitEvent(obj, "Pulled",  `Container image "${c.image}" already present on machine`, "Normal"));
-                            dispatch(emitEvent(obj, "Created", `Created container ${c.name}`, "Normal"));
-                            dispatch(emitEvent(obj, "Started", `Started container ${c.name}`, "Normal"));
-                        }
-
                         // Batch pods complete ~2 s after reaching Running.
                         // With BATCH_FAILURE_PROBABILITY one random container exits non-zero.
                         if (isBatch) {
@@ -329,6 +407,11 @@ export function useKubelet(
                             containerStatuses: newContainerStatuses,
                         }));
                     }
+
+                    // Created / Started events fire when container becomes ready
+                    const obj = { kind: "Pod" as const, name, namespace };
+                    dispatch(emitEvent(obj, "Created", `Created container ${container.name}`, "Normal"));
+                    dispatch(emitEvent(obj, "Started", `Started container ${container.name}`, "Normal"));
                 }, readyAt));
             }
         }
