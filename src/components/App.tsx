@@ -73,6 +73,7 @@ function makeInitialState(): AppState {
         allowVolumeExpansion: true,
       } satisfies StorageClass,
     ],
+    Events: [],
   };
 }
 

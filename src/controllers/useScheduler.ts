@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { ActionDispatch } from "react";
 import type { AppState, Action } from "../store/store";
-import { bindPodToNode, patchResource } from "../store/store";
+import { bindPodToNode, patchResource, emitEvent } from "../store/store";
 import type { Pod } from "../types/v1/Pod";
 import type { KubeNode } from "../types/v1/Node";
 import type { NodeSelectorRequirement } from "../types/v1/PersistentVolume";
@@ -100,6 +100,8 @@ export function useScheduler(
     const scheduledRef = useRef<Set<string>>(new Set());
     const wfcAnnotatedRef = useRef<Set<string>>(new Set());
     const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+    // Track last emitted FailedScheduling message per pod to avoid spamming identical events
+    const failedReasonRef = useRef<Map<string, string>>(new Map());
 
     useEffect(() => {
         const readyNodes = Nodes.filter(
@@ -151,7 +153,18 @@ export function useScheduler(
             if (unboundPVCs.length > 0) {
                 // Any non-WFC unbound PVC → pod cannot be scheduled
                 const allWFC = unboundPVCs.every(c => c?.spec.storageClassName === "local-path");
-                if (!allWFC) continue;
+                if (!allWFC) {
+                    const unboundNames = unboundPVCs.filter(c => c && c.status.phase !== "Bound").map(c => c!.metadata.name);
+                    const failMsg = `0/${readyNodes.length} nodes are available: unbound PersistentVolumeClaims: ${unboundNames.map(n => `"${n}"`).join(", ")}.`;
+                    if (failedReasonRef.current.get(pod.metadata.uid) !== failMsg) {
+                        failedReasonRef.current.set(pod.metadata.uid, failMsg);
+                        dispatch(emitEvent(
+                            { kind: "Pod", name: pod.metadata.name, namespace: pod.metadata.namespace },
+                            "FailedScheduling", failMsg, "Warning",
+                        ));
+                    }
+                    continue;
+                }
 
                 // All unbound PVCs are WFC. Stamp selected-node on those not yet annotated.
                 const needsAnnotation = (unboundPVCs as NonNullable<typeof pvcRefs[number]>[])
@@ -185,7 +198,7 @@ export function useScheduler(
                         }
                     }
                 }
-                continue; // Wait for PVC to be provisioned and bound
+                continue; // Wait for WFC PVC to be provisioned and bound
             }
 
             // ---------------------------------------------------------------
@@ -270,10 +283,46 @@ export function useScheduler(
                 nodeRemainingMemory(n, Pods) >= reqMemory
             );
 
-            if (eligibleNodes.length === 0) continue; // No node can satisfy requests; pod stays Pending
+            if (eligibleNodes.length === 0) {
+                // Determine the most specific failure reason
+                const affinityBlocked = affinityFiltered.length === 0;
+                let failMsg: string;
+                if (affinityBlocked) {
+                    // Find the PV whose nodeAffinity blocked all nodes
+                    const blockingPV = (() => {
+                        let remaining = selectorFiltered;
+                        for (const pvc of pvcRefs.filter(Boolean) as NonNullable<typeof pvcRefs[number]>[]) {
+                            const pvName = pvc.status.boundVolume;
+                            const pv = pvName ? PersistentVolumes.find(p => p.metadata.name === pvName) : undefined;
+                            const terms = pv?.spec.nodeAffinity?.required?.nodeSelectorTerms;
+                            if (!terms) continue;
+                            const next = remaining.filter(node =>
+                                terms.some(term => (term.matchExpressions ?? []).every(expr => matchNodeSelectorExpr(expr, node.metadata.labels)))
+                            );
+                            if (next.length === 0) return pv;
+                            remaining = next;
+                        }
+                        return undefined;
+                    })();
+                    failMsg = blockingPV
+                        ? `0/${readyNodes.length} nodes are available: 1 node(s) had volume node-affinity conflict (volume "${blockingPV.metadata.name}" is bound to a node that no longer exists).`
+                        : `0/${readyNodes.length} nodes are available: node affinity conflict.`;
+                } else {
+                    failMsg = `0/${affinityFiltered.length} nodes are available: insufficient cpu or memory.`;
+                }
+                if (failedReasonRef.current.get(pod.metadata.uid) !== failMsg) {
+                    failedReasonRef.current.set(pod.metadata.uid, failMsg);
+                    dispatch(emitEvent(
+                        { kind: "Pod", name: pod.metadata.name, namespace: pod.metadata.namespace },
+                        "FailedScheduling", failMsg, "Warning",
+                    ));
+                }
+                continue; // No node can satisfy requests; pod stays Pending
+            }
 
             // Mark as being scheduled now (prevents duplicate binds during the timer window)
             scheduledRef.current.add(pod.metadata.uid);
+            failedReasonRef.current.delete(pod.metadata.uid);
 
             // Spread-aware scoring: prefer nodes with fewer same-owner pods (spread),
             // then break ties by fewest total pods (least-loaded).
@@ -302,6 +351,12 @@ export function useScheduler(
 
             timersRef.current.push(setTimeout(() => {
                 dispatch(bindPodToNode(pod.metadata.name, pod.metadata.namespace, chosen.metadata.name));
+                dispatch(emitEvent(
+                    { kind: "Pod", name: pod.metadata.name, namespace: pod.metadata.namespace },
+                    "Scheduled",
+                    `Successfully assigned ${pod.metadata.namespace}/${pod.metadata.name} to ${chosen.metadata.name}`,
+                    "Normal",
+                ));
             }, SCHEDULE_DELAY_MS));
         }
     }, [Pods, Nodes, PersistentVolumeClaims, PersistentVolumes, dispatch]);
@@ -310,10 +365,12 @@ export function useScheduler(
         const timers = timersRef.current;
         const scheduled = scheduledRef.current;
         const wfcAnnotated = wfcAnnotatedRef.current;
+        const failedReason = failedReasonRef.current;
         return () => {
             timers.forEach(clearTimeout);
             scheduled.clear();
             wfcAnnotated.clear();
+            failedReason.clear();
         };
     }, []);
 }

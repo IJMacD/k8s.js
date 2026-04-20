@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { ActionDispatch } from "react";
 import type { AppState, Action } from "../store/store";
-import { updatePodStatus } from "../store/store";
+import { updatePodStatus, emitEvent } from "../store/store";
 
 /**
  * Simulates the Kubernetes kubelet.
@@ -283,6 +283,14 @@ export function useKubelet(
                             ],
                             containerStatuses: newContainerStatuses,
                         }));
+
+                        // Emit kubelet events for each container
+                        for (const c of appContainers) {
+                            const obj = { kind: "Pod", name, namespace };
+                            dispatch(emitEvent(obj, "Pulled",  `Container image "${c.image}" already present on machine`, "Normal"));
+                            dispatch(emitEvent(obj, "Created", `Created container ${c.name}`, "Normal"));
+                            dispatch(emitEvent(obj, "Started", `Started container ${c.name}`, "Normal"));
+                        }
 
                         // Batch pods complete ~2 s after reaching Running.
                         // With BATCH_FAILURE_PROBABILITY one random container exits non-zero.

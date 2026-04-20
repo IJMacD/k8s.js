@@ -12,6 +12,9 @@ import type { Secret } from "../types/v1/Secret";
 import type { PersistentVolume } from "../types/v1/PersistentVolume";
 import type { PersistentVolumeClaim } from "../types/v1/PersistentVolumeClaim";
 import type { StorageClass } from "../types/storage/v1/StorageClass";
+import type { KubeEvent } from "../types/v1/Event";
+
+const MAX_EVENTS = 500;
 
 export interface AppState {
     Deployments: Deployment[];
@@ -29,6 +32,7 @@ export interface AppState {
     PersistentVolumes: PersistentVolume[];
     PersistentVolumeClaims: PersistentVolumeClaim[];
     StorageClasses: StorageClass[];
+    Events: KubeEvent[];
 }
 
 const CreateDeploymentType = "CREATE_DEPLOYMENT";
@@ -77,6 +81,7 @@ const DeletePVCType = "DELETE_PVC";
 const BindPVCType = "BIND_PVC";
 const CreateStorageClassType = "CREATE_STORAGECLASS";
 const DeleteStorageClassType = "DELETE_STORAGECLASS";
+const EmitEventType = "EMIT_EVENT";
 
 export type ActionType =
     | typeof CreateDeploymentType
@@ -124,7 +129,8 @@ export type ActionType =
     | typeof DeletePVCType
     | typeof BindPVCType
     | typeof CreateStorageClassType
-    | typeof DeleteStorageClassType;
+    | typeof DeleteStorageClassType
+    | typeof EmitEventType;
 
 export interface CreateDeploymentAction {
     type: typeof CreateDeploymentType;
@@ -376,7 +382,20 @@ export type Action =
     | { type: typeof DeletePVCType; payload: { name: string; namespace: string } }
     | { type: typeof BindPVCType; payload: { pvcName: string; pvcNamespace: string; pvName: string } }
     | { type: typeof CreateStorageClassType; payload: StorageClass }
-    | { type: typeof DeleteStorageClassType; payload: { name: string } };
+    | { type: typeof DeleteStorageClassType; payload: { name: string } }
+    | { type: typeof EmitEventType; payload: Omit<KubeEvent, "uid" | "firstTimestamp" | "lastTimestamp" | "count"> };
+
+export function emitEvent(
+    involvedObject: KubeEvent["involvedObject"],
+    reason: string,
+    message: string,
+    type: "Normal" | "Warning" = "Normal",
+): Action {
+    return {
+        type: EmitEventType,
+        payload: { namespace: involvedObject.namespace, involvedObject, reason, message, type },
+    } as Action;
+}
 
 export function deleteDeployment(name: string, namespace = "default") {
     return { type: DeleteDeploymentType as typeof DeleteDeploymentType, payload: { name, namespace } };
@@ -1650,6 +1669,38 @@ export const reducer = (state: AppState, action: Action): AppState => {
             ...state,
             StorageClasses: state.StorageClasses.filter(sc => sc.metadata.name !== action.payload.name),
         };
+    }
+    if (action.type === EmitEventType) {
+        const now = new Date().toISOString();
+        const p = action.payload;
+        // Deduplicate: if same reason+object already in events, increment count
+        const existing = state.Events.findIndex(
+            e => e.involvedObject.kind === p.involvedObject.kind &&
+                e.involvedObject.name === p.involvedObject.name &&
+                e.involvedObject.namespace === p.involvedObject.namespace &&
+                e.reason === p.reason &&
+                e.message === p.message,
+        );
+        if (existing >= 0) {
+            const updated = state.Events.map((e, i) =>
+                i === existing ? { ...e, count: e.count + 1, lastTimestamp: now } : e
+            );
+            return { ...state, Events: updated };
+        }
+        const newEvent: KubeEvent = {
+            uid: crypto.randomUUID(),
+            namespace: p.namespace,
+            involvedObject: p.involvedObject,
+            reason: p.reason,
+            message: p.message,
+            type: p.type,
+            firstTimestamp: now,
+            lastTimestamp: now,
+            count: 1,
+        };
+        const events = [...state.Events, newEvent];
+        // Cap to MAX_EVENTS, dropping oldest first
+        return { ...state, Events: events.length > MAX_EVENTS ? events.slice(events.length - MAX_EVENTS) : events };
     }
     if (action.type === ResetStateType) {
         return action.payload;

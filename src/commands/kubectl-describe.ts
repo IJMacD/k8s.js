@@ -508,39 +508,32 @@ export async function* kubectlDescribe(
             ];
         };
 
-        // Synthetic events based on pod phase
+        // Read events from the store for this pod
         const podEvents = (): string[] => {
             const header = [
                 `Events:`,
-                `  Type    Reason      Age      From               Message`,
-                `  ----    ------      ----     ----               -------`,
+                `  Type     Reason             Age    From               Message`,
+                `  ----     ------             ---    ----               -------`,
             ];
-            if (!pod.spec.nodeName) {
-                const readyNodeCount = state.Nodes.filter(
-                    n => !n.spec.unschedulable &&
-                        n.status.conditions.find(c => c.type === "Ready")?.status === "True",
-                ).length;
-                const total = state.Nodes.length;
-                const msg = total === 0
-                    ? `no nodes available to schedule pods`
-                    : `0/${readyNodeCount} nodes are available: insufficient cpu or memory.`;
-                return [
-                    ...header,
-                    `  Warning  FailedScheduling  <unk>    default-scheduler  ${msg}`,
-                ];
-            }
-            const nodeName = pod.spec.nodeName;
-            const image = pod.spec.containers[0]?.image ?? "";
-            const containerName = pod.spec.containers[0]?.name ?? "";
-            const scheduled = `  Normal  Scheduled   <unk>    default-scheduler  Successfully assigned ${pod.metadata.namespace}/${pod.metadata.name} to ${nodeName}`;
-            if (pod.status.phase === "Pending") return [...header, scheduled];
-            return [
-                ...header,
-                scheduled,
-                `  Normal  Pulled      <unk>    kubelet            Container image "${image}" already present on machine`,
-                `  Normal  Created     <unk>    kubelet            Created container ${containerName}`,
-                `  Normal  Started     <unk>    kubelet            Started container ${containerName}`,
-            ];
+            const events = state.Events.filter(
+                e => e.involvedObject.kind === "Pod" &&
+                    e.involvedObject.name === pod.metadata.name &&
+                    e.involvedObject.namespace === pod.metadata.namespace,
+            );
+            if (events.length === 0) return [...header, `  <none>`];
+            const from = (reason: string) =>
+                reason === "Scheduled" || reason === "FailedScheduling" ? "default-scheduler" : "kubelet";
+            const rows = events.map(e => {
+                const age = (() => {
+                    const secs = Math.floor((Date.now() - new Date(e.lastTimestamp).getTime()) / 1000);
+                    if (secs < 60) return `${secs}s`;
+                    if (secs < 3600) return `${Math.floor(secs / 60)}m`;
+                    return `${Math.floor(secs / 3600)}h`;
+                })();
+                const countSuffix = e.count > 1 ? ` (x${e.count})` : "";
+                return `  ${e.type.padEnd(8)} ${e.reason.padEnd(18)} ${age.padEnd(6)} ${from(e.reason).padEnd(18)} ${e.message}${countSuffix}`;
+            });
+            return [...header, ...rows];
         };
 
         const lines: string[] = [

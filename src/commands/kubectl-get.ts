@@ -407,6 +407,22 @@ export async function* kubectlGet(
             ]);
             return fmtTable(headers, rows);
         }
+        if (type === "events" || type === "event" || type === "ev") {
+            const items = state.Events.filter(
+                e => allNs || e.namespace === namespace,
+            );
+            const headers = [...nsHdr, "LAST SEEN", "TYPE", "REASON", "OBJECT", "MESSAGE"];
+            const rows = items.map(e => [
+                ...nsCol(e.namespace),
+                ageStr(e.lastTimestamp),
+                e.type,
+                e.reason,
+                `${e.involvedObject.kind.toLowerCase()}/${e.involvedObject.name}`,
+                e.count > 1 ? `${e.message} (x${e.count})` : e.message,
+            ]);
+            if (rows.length === 0) return "No resources found" + (namespace && !allNs ? ` in ${namespace} namespace.` : ".");
+            return fmtTable(headers, rows);
+        }
         if (type === "all") {
             const kinds: Array<[string, string]> = [
                 ["pods", "pod.v1"],
