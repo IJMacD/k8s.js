@@ -137,9 +137,27 @@ export function Browser({ state, onDismiss }: { state: AppState; onDismiss?: () 
                             {" · "}
                             Server: {(current.result as SimResponse).headers["Server"]}
                         </div>
-                        {/* Rendered body */}
+                        {/* Rendered body — intercept link clicks via event delegation */}
                         <div
                             style={{ padding: "16px 24px" }}
+                            onClick={e => {
+                                const anchor = (e.target as HTMLElement).closest("a");
+                                if (!anchor) return;
+                                const href = anchor.getAttribute("href");
+                                if (!href) return;
+                                e.preventDefault();
+                                // Resolve relative hrefs against the current page's URL
+                                let target = href;
+                                if (!href.startsWith("http")) {
+                                    try {
+                                        const base = current?.url ?? addressBar;
+                                        target = new URL(href, base).toString();
+                                    } catch {
+                                        target = href;
+                                    }
+                                }
+                                navigate(target);
+                            }}
                             // All user-controlled values (path, hostname) are HTML-escaped in simFetch
                             // before being placed in the body string.
                             dangerouslySetInnerHTML={{ __html: (current.result as SimResponse).body }}
