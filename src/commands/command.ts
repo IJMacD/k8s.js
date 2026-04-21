@@ -1,6 +1,7 @@
 import type { ActionDispatch } from "react";
 import { type Action, type AppState } from "../store/store";
 import { kubectl } from "./kubectl";
+import { exec as graphExec } from "./kubectl-graph";
 import { ping } from "./ping";
 import { curl } from "./curl";
 import { nslookup } from "./nslookup";
@@ -78,6 +79,7 @@ async function* exec(
     dispatch: ActionDispatch<[action: Action]>,
     getState: () => AppState,
     openEditor: (yaml: string, namespace: string, mode?: EditorMode, filename?: string) => void,
+    openDiagram: (dot: string) => void = () => { },
     stdin: string | null = null,
 ): AsyncGenerator<string> {
     if (command === "") {
@@ -153,7 +155,13 @@ async function* exec(
         if (existing === undefined) writeFile(filename, "");
         openEditor(existing ?? "", "default", "file-edit", filename);
     } else if (command === "kubectl") {
-        yield* kubectl(args, dispatch, getState, openEditor, stdin);
+        if (args[0] === "graph") {
+            yield* graphExec(command, args.slice(1), dispatch, getState, openEditor, openDiagram, stdin);
+        } else {
+            yield* kubectl(args, dispatch, getState, openEditor, stdin);
+        }
+    } else if (command === "graph") {
+        yield* graphExec(command, args, dispatch, getState, openEditor, openDiagram, stdin);
     } else {
         yield `Unknown command: ${command}`;
     }
@@ -164,6 +172,7 @@ export async function* shell(
     dispatch: ActionDispatch<[action: Action]>,
     getState: () => AppState,
     openEditor: (yaml: string, namespace: string, mode?: EditorMode, filename?: string) => void = () => { },
+    openDiagram: (dot: string) => void = () => { },
 ): AsyncGenerator<string> {
     const { cmdLine, stdin } = parseHeredoc(inputLine.trim());
     const { cmd, redirectTo } = parseRedirect(cmdLine);
@@ -174,12 +183,12 @@ export async function* shell(
 
     if (redirectTo) {
         const lines: string[] = [];
-        for await (const line of exec(command, args, dispatch, getState, openEditor, stdin)) {
+        for await (const line of exec(command, args, dispatch, getState, openEditor, openDiagram, stdin)) {
             lines.push(line);
         }
         writeFile(redirectTo, lines.join("\n"));
         return;
     }
 
-    yield* exec(command, args, dispatch, getState, openEditor, stdin);
+    yield* exec(command, args, dispatch, getState, openEditor, openDiagram, stdin);
 }

@@ -8,6 +8,7 @@ import type { EditorMode } from './Editor';
 import { reducer, resetState, createNode, type AppState } from '../store/store';
 import type { StorageClass } from '../types/storage/v1/StorageClass';
 import { shell } from '../commands/command';
+import { Diagram } from './Diagram';
 import { writeFile } from '../commands/helpers/filesystem';
 import { ResourceTabs } from './ResourceTabs';
 import { useDeploymentController } from '../controllers/useDeploymentController';
@@ -87,6 +88,7 @@ function App() {
     return makeInitialState();
   });
   const [bottomTab, setBottomTab] = useState<'terminal' | 'browser' | 'editor' | null>('terminal');
+  const [diagram, setDiagram] = useState<string | null>(null);
   const [editorSession, setEditorSession] = useState<{ id: string; yaml: string; namespace: string; mode: EditorMode; filename?: string } | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showAddNode, setShowAddNode] = useState(false);
@@ -141,8 +143,12 @@ function App() {
     setBottomTab(prev => prev === 'editor' ? 'terminal' : prev);
   }
 
+  const openDiagram = useCallback((dot: string) => {
+    setDiagram(dot);
+  }, []);
+
   function handleCommand(inputLine: string): AsyncGenerator<string> {
-    return shell(inputLine, dispatch, () => storeRef.current, openEditor);
+    return shell(inputLine, dispatch, () => storeRef.current, openEditor, openDiagram);
   }
 
   return (
@@ -273,6 +279,9 @@ function App() {
             </button>
           )}
         </div>
+      )}
+      {diagram && (
+        <Diagram dot={diagram} onClose={() => setDiagram(null)} />
       )}
       {showAddNode && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}
