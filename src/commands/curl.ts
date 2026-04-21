@@ -398,6 +398,102 @@ export interface SimError {
     podImage?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Map image → static-file document roots the web server serves from.
+// Returns [] for programmatic servers that have no static doc root.
+// ---------------------------------------------------------------------------
+function docRootsForImage(image: string): string[] {
+    const base = image.split(":")[0].toLowerCase();
+    const matches = (token: string) =>
+        base === token || base.endsWith("/" + token) || base.startsWith(token + "/");
+    if (matches("nginx"))                              return ["/usr/share/nginx/html", "/var/www/html"];
+    if (matches("httpd") || matches("apache") || matches("php"))
+                                                       return ["/usr/local/apache2/htdocs", "/var/www/html"];
+    if (matches("caddy"))                              return ["/usr/share/caddy", "/var/www/html"];
+    if (matches("python") || matches("node") || matches("ruby") || matches("golang"))
+                                                       return [];
+    if (isHttpServer(image))                           return ["/var/www/html"];
+    return [];
+}
+
+function contentTypeForFilename(filename: string): string {
+    const ext = filename.slice(filename.lastIndexOf(".")).toLowerCase();
+    if (ext === ".html" || ext === ".htm") return "text/html";
+    if (ext === ".css")                    return "text/css";
+    if (ext === ".js")                     return "application/javascript";
+    if (ext === ".json")                   return "application/json";
+    return "text/plain";
+}
+
+type VolumeFetchResult =
+    | { body: string; contentType: string }  // file found
+    | { notFound: true }                      // mount exists but key missing
+    | null;                                   // no applicable mount
+
+/**
+ * Returns content from a configMap/secret volume mounted at the image's
+ * document root, or null when no such mount applies (caller falls through
+ * to the default generated response).
+ */
+function resolveVolumeFetch(
+    pod: AppState["Pods"][number],
+    image: string,
+    requestPath: string,
+    state: AppState,
+): VolumeFetchResult {
+    const docRoots = docRootsForImage(image);
+    if (docRoots.length === 0) return null;
+
+    const ns = pod.metadata.namespace;
+
+    for (const container of pod.spec.containers) {
+        for (const vm of container.volumeMounts ?? []) {
+            // Directory mount: mountPath is exactly a doc root.
+            const isDirMount = docRoots.includes(vm.mountPath);
+            // File mount: mountPath is a specific file inside a doc root.
+            const parentDocRoot = !isDirMount
+                ? docRoots.find(r => vm.mountPath.startsWith(r + "/"))
+                : undefined;
+
+            if (!isDirMount && !parentDocRoot) continue;
+
+            const vol = pod.spec.volumes?.find(v => v.name === vm.name);
+            if (!vol) continue;
+
+            let data: Record<string, string> | undefined;
+            if (vol.configMap) {
+                data = state.ConfigMaps.find(
+                    cm => cm.metadata.name === vol.configMap!.name && cm.metadata.namespace === ns,
+                )?.data;
+            } else if (vol.secret) {
+                data = state.Secrets.find(
+                    s => s.metadata.name === vol.secret!.secretName && s.metadata.namespace === ns,
+                )?.data;
+            }
+            if (!data) continue; // not a configMap/secret-backed volume
+
+            if (isDirMount) {
+                const filename = requestPath === "/" || requestPath === ""
+                    ? "index.html"
+                    : requestPath.replace(/^\//, "");
+                if (!(filename in data)) return { notFound: true };
+                return { body: data[filename], contentType: contentTypeForFilename(filename) };
+            } else {
+                // File mount: only serve when the request path matches this file.
+                const filename = vm.mountPath.slice(parentDocRoot!.length + 1);
+                const requestMatches =
+                    requestPath === "/" + filename ||
+                    (requestPath === "/" && filename === "index.html");
+                if (!requestMatches) continue;
+                if (!(filename in data)) return { notFound: true };
+                return { body: data[filename], contentType: contentTypeForFilename(filename) };
+            }
+        }
+    }
+
+    return null;
+}
+
 export function clusterFetch(rawUrl: string, state: AppState): SimResponse | SimError {
     const { host, port, path } = parseUrl(rawUrl);
 
@@ -441,6 +537,48 @@ export function clusterFetch(rawUrl: string, state: AppState): SimResponse | Sim
     })();
 
     const pod = state.Pods.find(p => p.metadata.name === target.podName && p.metadata.namespace === target.podNamespace);
+
+    // ── Volume mount file serving ─────────────────────────────────────
+    // When the pod has a configMap/secret volume mounted at its document root,
+    // serve directly from that data instead of generating the default response.
+    if (pod) {
+        const volumeResult = resolveVolumeFetch(pod, target.image, path, state);
+        if (volumeResult !== null) {
+            if ("notFound" in volumeResult) {
+                const notFoundBody = [
+                    `<!DOCTYPE html>`,
+                    `<html><head><title>404 Not Found</title></head>`,
+                    `<body style="font-family:sans-serif;padding:16px 24px">`,
+                    `<h1>404 Not Found</h1>`,
+                    `<p>The requested URL <code>${esc(path)}</code> was not found on this server.</p>`,
+                    `<hr><address>${esc(server)}</address>`,
+                    `</body></html>`,
+                ].join("\n");
+                return {
+                    ok: true,
+                    status: 404,
+                    statusText: "Not Found",
+                    headers: { "Date": date, "Server": server, "Content-Type": "text/html", "Connection": "keep-alive" },
+                    body: notFoundBody,
+                    host, dialPort: port, path,
+                    dialIP: target.dialIP, resolvedIP: target.resolvedIP,
+                    podName: target.podName, viaService: target.viaService,
+                };
+            } else {
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: "OK",
+                    headers: { "Date": date, "Server": server, "Content-Type": volumeResult.contentType, "Connection": "keep-alive" },
+                    body: volumeResult.body,
+                    host, dialPort: port, path,
+                    dialIP: target.dialIP, resolvedIP: target.resolvedIP,
+                    podName: target.podName, viaService: target.viaService,
+                };
+            }
+        }
+    }
+
     const envEntries = pod ? resolveEnv(pod, state) : [];
     const envSection = envEntries.length > 0
         ? [

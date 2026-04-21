@@ -63,10 +63,12 @@ export function useKubelet(
     state: AppState,
     dispatch: ActionDispatch<[action: Action]>,
 ) {
-    const scheduledRef = useRef<Set<string>>(new Set());
-    const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+    const scheduledRef        = useRef<Set<string>>(new Set());
+    const volumeErrorRef      = useRef<Set<string>>(new Set());
+    const imagePullBackoffRef = useRef<Set<string>>(new Set());
+    const timersRef           = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-    const { Pods, Nodes, Secrets } = state;
+    const { Pods, Nodes, ConfigMaps, Secrets } = state;
 
     useEffect(() => {
         for (const pod of Pods) {
@@ -83,6 +85,37 @@ export function useKubelet(
 
             // Fully transitioned — nothing to do
             if (hasContainersReady) continue;
+
+            // ── Recovery: clear error-stalled pods when the missing resource appears ──
+            if (imagePullBackoffRef.current.has(uid)) {
+                const allImages = [
+                    ...(pod.spec.initContainers ?? []),
+                    ...pod.spec.containers,
+                ].map(c => c.image ?? "");
+                const privateImages = [...new Set(allImages.filter(isPrivateRegistry))];
+                const nowHasSecret = (pod.spec.imagePullSecrets ?? []).some(ref =>
+                    Secrets.some(s => s.metadata.name === ref.name && s.metadata.namespace === pod.metadata.namespace),
+                );
+                if (privateImages.length === 0 || nowHasSecret) {
+                    imagePullBackoffRef.current.delete(uid);
+                    scheduledRef.current.delete(uid);
+                }
+            }
+            if (volumeErrorRef.current.has(uid)) {
+                const allResolved = (pod.spec.volumes ?? []).every(vol => {
+                    if (vol.configMap) return ConfigMaps.some(
+                        cm => cm.metadata.name === vol.configMap!.name && cm.metadata.namespace === pod.metadata.namespace,
+                    );
+                    if (vol.secret) return Secrets.some(
+                        s => s.metadata.name === vol.secret!.secretName && s.metadata.namespace === pod.metadata.namespace,
+                    );
+                    return true;
+                });
+                if (allResolved) {
+                    volumeErrorRef.current.delete(uid);
+                    scheduledRef.current.delete(uid);
+                }
+            }
 
             // Secondary guard: don't schedule the same pod's timers more than once per mount
             if (scheduledRef.current.has(uid)) continue;
@@ -130,6 +163,45 @@ export function useKubelet(
                             })),
                         }));
                     }, 1_500));
+                    imagePullBackoffRef.current.add(uid);
+                    continue;
+                }
+            }
+
+            // ── ConfigMap / Secret volume validation ─────────────────────────
+            // Block pod start if any referenced ConfigMap or Secret doesn't exist,
+            // mirroring the real kubelet's CreateContainerConfigError behaviour.
+            {
+                const missingVolume = (pod.spec.volumes ?? []).find(vol => {
+                    if (vol.configMap) return !ConfigMaps.some(
+                        cm => cm.metadata.name === vol.configMap!.name && cm.metadata.namespace === namespace,
+                    );
+                    if (vol.secret) return !Secrets.some(
+                        s => s.metadata.name === vol.secret!.secretName && s.metadata.namespace === namespace,
+                    );
+                    return false;
+                });
+                if (missingVolume) {
+                    const resourceName = missingVolume.configMap?.name ?? missingVolume.secret?.secretName ?? "unknown";
+                    const resourceKind = missingVolume.configMap ? "configmap" : "secret";
+                    dispatch(emitEvent(
+                        { kind: "Pod" as const, name, namespace },
+                        "Failed",
+                        `Error: ${resourceKind} "${resourceName}" not found`,
+                        "Warning",
+                    ));
+                    timersRef.current.push(setTimeout(() => {
+                        dispatch(updatePodStatus(name, namespace, {
+                            containerStatuses: pod.spec.containers.map(c => ({
+                                name: c.name,
+                                ready: false,
+                                started: false,
+                                restartCount: 0,
+                                state: { waiting: { reason: "CreateContainerConfigError" } },
+                            })),
+                        }));
+                    }, 1_500));
+                    volumeErrorRef.current.add(uid);
                     continue;
                 }
             }
@@ -479,17 +551,21 @@ export function useKubelet(
                 }, readyAt));
             }
         }
-    }, [Pods, Nodes, dispatch]);
+    }, [Pods, Nodes, ConfigMaps, Secrets, dispatch]);
 
     // Clear timers and reset tracking on unmount.
     // scheduledRef must also be cleared so React Strict Mode's simulated
     // unmount/remount cycle doesn't strand partially-started pods.
     useEffect(() => {
-        const timers    = timersRef.current;
-        const scheduled = scheduledRef.current;
+        const timers       = timersRef.current;
+        const scheduled    = scheduledRef.current;
+        const volumeErrors = volumeErrorRef.current;
+        const pullBackoffs = imagePullBackoffRef.current;
         return () => {
             timers.forEach(clearTimeout);
             scheduled.clear();
+            volumeErrors.clear();
+            pullBackoffs.clear();
         };
     }, []);
 }
