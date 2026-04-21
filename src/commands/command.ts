@@ -4,7 +4,7 @@ import { kubectl } from "./kubectl";
 import { ping } from "./ping";
 import { curl } from "./curl";
 import { nslookup } from "./nslookup";
-import { listFiles, readFile, writeFile } from "./helpers/filesystem";
+import { deleteFile, listFiles, readFile, writeFile } from "./helpers/filesystem";
 import type { EditorMode } from "../components/Editor";
 
 /**
@@ -108,6 +108,35 @@ async function* exec(
                 yield `cat: ${args[0]}: No such file`;
             } else {
                 yield content;
+            }
+        }
+    } else if (command === "rm") {
+        if (!args[0]) {
+            yield "rm: missing operand";
+        } else if (!deleteFile(args[0])) {
+            yield `rm: ${args[0]}: No such file`;
+        }
+    } else if (command === "cp") {
+        if (!args[0] || !args[1]) {
+            yield "cp: missing operand";
+        } else {
+            const content = readFile(args[0]);
+            if (content === undefined) {
+                yield `cp: ${args[0]}: No such file`;
+            } else {
+                writeFile(args[1], content);
+            }
+        }
+    } else if (command === "mv") {
+        if (!args[0] || !args[1]) {
+            yield "mv: missing operand";
+        } else {
+            const content = readFile(args[0]);
+            if (content === undefined) {
+                yield `mv: ${args[0]}: No such file`;
+            } else {
+                writeFile(args[1], content);
+                deleteFile(args[0]);
             }
         }
     } else if (command === "curl") {
