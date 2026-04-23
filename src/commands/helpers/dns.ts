@@ -23,16 +23,18 @@ export function lookupClusterDNS(host: string, state: AppState): DnsRecord[] {
         return [{ name: host, addresses: [host], type: "A" }];
     }
 
-    // --- 2. Pod-specific headless DNS: <pod>.<svc>.<ns>.svc[.cluster[.local]] ---
+    // --- 2. Pod-specific headless DNS: <pod>.<svc>[.<ns>[.svc[.cluster[.local]]]] ---
     const podDnsPatterns = [
         /^(?<pod>[^.]+)\.(?<svc>[^.]+)\.(?<ns>[^.]+)\.svc\.cluster\.local$/,
         /^(?<pod>[^.]+)\.(?<svc>[^.]+)\.(?<ns>[^.]+)\.svc\.cluster$/,
         /^(?<pod>[^.]+)\.(?<svc>[^.]+)\.(?<ns>[^.]+)\.svc$/,
+        /^(?<pod>[^.]+)\.(?<svc>[^.]+)\.(?<ns>[^.]+)$/,
+        /^(?<pod>[^.]+)\.(?<svc>[^.]+)$/,
     ];
     for (const pattern of podDnsPatterns) {
         const m = host.match(pattern);
         if (m?.groups) {
-            const { pod, svc, ns } = m.groups;
+            const { pod, svc, ns = "default" } = m.groups;
             const headlessSvc = Services.find(
                 s => s.metadata.name === svc && s.metadata.namespace === ns && s.spec.clusterIP === "None",
             );
