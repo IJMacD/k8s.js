@@ -37,11 +37,15 @@ export function useLocalPathProvisioner(
         if (managedClasses.size === 0) return;
 
         const unprovisioned = PersistentVolumeClaims.filter(pvc => {
-            if (!pvc.spec.storageClassName || !managedClasses.has(pvc.spec.storageClassName)) return false;
+            if (!pvc.spec.storageClassName) return false;
+            const sc = StorageClasses.find(s => s.metadata.name === pvc.spec.storageClassName && s.provisioner === PROVISIONER);
+            if (!sc) return false;
             if (pvc.status.phase !== "Pending") return false;
             if (provisionedRef.current.has(pvc.metadata.uid)) return false;
-            // WaitForFirstConsumer: only provision once the scheduler has selected a node
-            if (!pvc.metadata.annotations["volume.kubernetes.io/selected-node"]) return false;
+            if (sc.volumeBindingMode === "WaitForFirstConsumer" && !pvc.metadata.annotations["volume.kubernetes.io/selected-node"]) {
+                // WaitForFirstConsumer: only provision once the scheduler has selected a node
+                return false;
+            }
             // Don't provision if a suitable Available PV already exists (e.g. user-created)
             const alreadyCovered = PersistentVolumes.some(pv =>
                 pv.status.phase === "Available" &&
@@ -53,16 +57,17 @@ export function useLocalPathProvisioner(
         });
 
         for (const pvc of unprovisioned) {
-            // Use the selected-node annotation stamped by the scheduler (WaitForFirstConsumer)
-            const selectedNodeName = pvc.metadata.annotations["volume.kubernetes.io/selected-node"];
-            const chosenNode: KubeNode | undefined = readyNodes.find(n => n.metadata.name === selectedNodeName);
+            const sc = StorageClasses.find(s => s.metadata.name === pvc.spec.storageClassName && s.provisioner === PROVISIONER);
+
+            const chosenNode: KubeNode | undefined = sc?.volumeBindingMode === "WaitForFirstConsumer" ?
+                readyNodes.find(n => n.metadata.name === pvc.metadata.annotations["volume.kubernetes.io/selected-node"]) :
+                pick(readyNodes);
             if (!chosenNode) continue; // Selected node no longer ready — wait
 
             provisionedRef.current.add(pvc.metadata.uid);
 
             const pvName = `pvc-${pvc.metadata.uid}`;
             const path = `/var/local-path-provisioner/${pvc.metadata.namespace}_${pvc.metadata.name}_${pvc.metadata.uid}`;
-            const sc = StorageClasses.find(s => s.metadata.name === pvc.spec.storageClassName);
             const reclaimPolicy = sc?.reclaimPolicy ?? "Delete";
 
             timersRef.current.push(setTimeout(() => {
@@ -99,3 +104,9 @@ export function useLocalPathProvisioner(
         };
     }, []);
 }
+
+function pick<T>(items: T[]): T | undefined {
+    // Pick a random item
+    return items.length > 0 ? items[Math.floor(Math.random() * items.length)] : undefined;
+}
+
