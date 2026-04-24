@@ -106,6 +106,7 @@ function App() {
   const [nodeMemory, setNodeMemory] = useState('8Gi');
 
   const [bottomPanelHeight, setBottomPanelHeight] = useSavedState('k8s.js-bottomPanelHeight', 400);
+  const [isResizing, setIsResizing] = useState(false);
 
   useDeploymentController(store, dispatch);
   useReplicaSetController(store, dispatch);
@@ -175,18 +176,18 @@ function App() {
     }
 
     function onMouseUp() {
-      document.body.style.cursor = '';
+      setIsResizing(false);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
     }
 
-    document.body.style.cursor = 'row-resize';
+    setIsResizing(true);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
   }
 
   return (
-    <>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', cursor: isResizing ? 'row-resize' : 'default' }}>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '0 16px', flexShrink: 0 }}>
           <h1 style={{ margin: '16px 0' }}>k8s.js</h1>
@@ -239,7 +240,7 @@ function App() {
       </div>
       {/* Bottom panel — always mounted to preserve Console/Browser state */}
       <div style={{ display: bottomTab !== null ? 'flex' : 'none', flexDirection: 'column', flexShrink: 0, height: bottomPanelHeight, overflow: 'hidden' }}>
-        <div style={{ height: '4px', cursor: 'row-resize', background: 'transparent' }} onMouseDown={handleResizeMouseDown} />
+        <div style={{ height: '4px', cursor: 'row-resize', background: isResizing ? 'lightblue' : 'transparent' }} onMouseDown={handleResizeMouseDown} />
         {/* Tab strip */}
         <div style={{ display: 'flex', alignItems: 'stretch', backgroundColor: '#252526', borderTop: '1px solid #333', flexShrink: 0, minHeight: 24 }}>
           {(['terminal', 'browser', ...(editorSession ? ['editor' as const] : [])] as const).map(tab => (
@@ -399,7 +400,7 @@ function App() {
           </div>
         </div>
       )}
-    </>
+    </div>
   )
 }
 

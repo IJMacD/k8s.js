@@ -47,6 +47,7 @@
   width: 100%;
   border-bottom: 2px solid var(--border);
   gap: 0;
+  overflow-x: auto;
 }
 
 .resource-tabs__tab {
