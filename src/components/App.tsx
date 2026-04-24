@@ -24,6 +24,7 @@ import { useServiceController } from '../controllers/useServiceController';
 import { usePVCBinder } from '../controllers/usePVCBinder';
 import { useLocalPathProvisioner } from '../controllers/useLocalPathProvisioner';
 import { useSavedState } from '../hooks/useSavedState';
+import { useStorageClassController } from '../controllers/useStorageClassController';
 const STORAGE_KEY = 'k8s-apiserver';
 
 function makeInitialState(): AppState {
@@ -69,7 +70,15 @@ function makeInitialState(): AppState {
     PersistentVolumeClaims: [],
     StorageClasses: [
       {
-        metadata: { uid: crypto.randomUUID(), name: 'local-path', labels: {}, annotations: {}, creationTimestamp: now },
+        metadata: {
+          uid: crypto.randomUUID(),
+          name: 'local-path',
+          labels: {},
+          annotations: {
+            'storageclass.kubernetes.io/is-default-class': 'true',
+          },
+          creationTimestamp: now
+        },
         provisioner: 'local-path-provisioner',
         reclaimPolicy: 'Delete',
         volumeBindingMode: 'WaitForFirstConsumer',
@@ -110,6 +119,7 @@ function App() {
   useServiceController(store, dispatch);
   usePVCBinder(store, dispatch);
   useLocalPathProvisioner(store, dispatch);
+  useStorageClassController(store, dispatch);
 
   useEffect(() => {
     try {

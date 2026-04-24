@@ -1470,7 +1470,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
         const apply = <T extends object>(item: T): T => mergePatch(item, patch);
         const match = <T extends { metadata: { name: string; namespace?: string } }>(r: T) =>
             r.metadata.name === name && (r.metadata.namespace === undefined || r.metadata.namespace === namespace);
-        switch (kind) {
+        switch (kind.toLowerCase()) {
             case "deployment": return { ...state, Deployments: state.Deployments.map(r => match(r) ? apply(r) : r) };
             case "replicaset": return { ...state, ReplicaSets: state.ReplicaSets.map(r => match(r) ? apply(r) : r) };
             case "daemonset":  return { ...state, DaemonSets:  state.DaemonSets.map(r => match(r) ? apply(r) : r) };
