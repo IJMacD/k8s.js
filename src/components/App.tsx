@@ -23,6 +23,7 @@ import { useStatefulSetController } from '../controllers/useStatefulSetControlle
 import { useServiceController } from '../controllers/useServiceController';
 import { usePVCBinder } from '../controllers/usePVCBinder';
 import { useLocalPathProvisioner } from '../controllers/useLocalPathProvisioner';
+import { useSavedState } from '../hooks/useSavedState';
 const STORAGE_KEY = 'k8s-apiserver';
 
 function makeInitialState(): AppState {
@@ -95,6 +96,8 @@ function App() {
   const [nodeCpu, setNodeCpu] = useState('4');
   const [nodeMemory, setNodeMemory] = useState('8Gi');
 
+  const [bottomPanelHeight, setBottomPanelHeight] = useSavedState('k8s.js-bottomPanelHeight', 400);
+
   useDeploymentController(store, dispatch);
   useReplicaSetController(store, dispatch);
   useKubelet(store, dispatch);
@@ -151,6 +154,27 @@ function App() {
     return shell(inputLine, dispatch, () => storeRef.current, openEditor, openDiagram);
   }
 
+  function handleResizeMouseDown(e: React.MouseEvent) {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = bottomPanelHeight;
+
+    function onMouseMove(e: MouseEvent) {
+      const delta = startY - e.clientY;
+      setBottomPanelHeight(Math.max(100, startHeight + delta));
+    }
+
+    function onMouseUp() {
+      document.body.style.cursor = '';
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    }
+
+    document.body.style.cursor = 'row-resize';
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }
+
   return (
     <>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
@@ -204,9 +228,10 @@ function App() {
         />
       </div>
       {/* Bottom panel — always mounted to preserve Console/Browser state */}
-      <div style={{ display: bottomTab !== null ? 'flex' : 'none', flexDirection: 'column', flexShrink: 0 }}>
+      <div style={{ display: bottomTab !== null ? 'flex' : 'none', flexDirection: 'column', flexShrink: 0, height: bottomPanelHeight, overflow: 'hidden' }}>
+        <div style={{ height: '4px', cursor: 'row-resize', background: 'transparent' }} onMouseDown={handleResizeMouseDown} />
         {/* Tab strip */}
-        <div style={{ display: 'flex', alignItems: 'stretch', backgroundColor: '#252526', borderTop: '1px solid #333', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'stretch', backgroundColor: '#252526', borderTop: '1px solid #333', flexShrink: 0, minHeight: 24 }}>
           {(['terminal', 'browser', ...(editorSession ? ['editor' as const] : [])] as const).map(tab => (
             <button
               key={tab}
@@ -234,25 +259,20 @@ function App() {
           >✕</button>
         </div>
         {/* Panels */}
-        <div style={{ display: bottomTab === 'terminal' ? undefined : 'none' }}>
-          <Console ref={consoleRef} onCommand={handleCommand} />
-        </div>
-        <div style={{ display: bottomTab === 'browser' ? undefined : 'none' }}>
-          <Browser state={store} />
-        </div>
+        <Console ref={consoleRef} onCommand={handleCommand} style={{ flex: 1, display: bottomTab === 'terminal' ? undefined : 'none' }} />
+        <Browser state={store} style={{ flex: 1, display: bottomTab === 'browser' ? undefined : 'none' }} />
         {editorSession && (
-          <div style={{ display: bottomTab === 'editor' ? undefined : 'none' }}>
-            <Editor
-              key={editorSession.id}
-              state={store}
-              dispatch={dispatch}
-              initialContent={editorSession.yaml}
-              namespace={editorSession.namespace}
-              mode={editorSession.mode}
-              filename={editorSession.filename}
-              onClose={handleEditorClose}
-            />
-          </div>
+          <Editor
+            key={editorSession.id}
+            state={store}
+            dispatch={dispatch}
+            initialContent={editorSession.yaml}
+            namespace={editorSession.namespace}
+            mode={editorSession.mode}
+            filename={editorSession.filename}
+            onClose={handleEditorClose}
+            style={{ flex: 1, display: bottomTab === 'editor' ? 'flex' : 'none' }}
+          />
         )}
       </div>
       {/* Minimised bar */}

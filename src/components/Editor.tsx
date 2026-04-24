@@ -14,9 +14,10 @@ interface EditorProps {
   onClose: () => void;
   mode?: EditorMode;
   filename?: string;
+  style?: React.CSSProperties;
 }
 
-export function Editor({ state, dispatch, initialContent, namespace, onClose, mode = 'kubectl-edit', filename }: EditorProps) {
+export function Editor({ state, dispatch, initialContent, namespace, onClose, mode = 'kubectl-edit', filename, style }: EditorProps) {
   const [content, setContent] = useState(initialContent);
   const [output, setOutput] = useState<string[]>([]);
   const [isErrorOutput, setIsErrorOutput] = useState(false);
@@ -81,7 +82,7 @@ export function Editor({ state, dispatch, initialContent, namespace, onClose, mo
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '400px', backgroundColor: '#1e1e1e', fontFamily: 'monospace' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', backgroundColor: '#1e1e1e', fontFamily: 'monospace', ...style }}>
       {/* Toolbar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px', backgroundColor: '#252526', borderBottom: '1px solid #333', flexShrink: 0 }}>
         <span style={{ color: '#888', fontSize: '11px', flex: 1 }}>

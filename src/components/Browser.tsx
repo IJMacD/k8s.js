@@ -4,7 +4,7 @@ import type { AppState } from "../store/store";
 
 type NavEntry = { url: string; result: SimResponse | SimError | null };
 
-export function Browser({ state, onDismiss }: { state: AppState; onDismiss?: () => void }) {
+export function Browser({ state, onDismiss, style }: { state: AppState; onDismiss?: () => void, style?: React.CSSProperties }) {
     const [addressBar, setAddressBar] = useState("http://");
     const [history, setHistory] = useState<NavEntry[]>([]);
     const [cursor, setCursor] = useState(-1); // index into history; -1 = blank page
@@ -54,7 +54,7 @@ export function Browser({ state, onDismiss }: { state: AppState; onDismiss?: () 
             flexDirection: "column",
             borderTop: "1px solid var(--border)",
             background: "var(--bg)",
-            height: "400px",
+            ...style,
         }}>
             {/* Chrome bar */}
             <div style={{

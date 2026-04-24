@@ -59,7 +59,7 @@ export interface ConsoleHandle {
     submitCommand: (cmd: string) => void;
 }
 
-export const Console = forwardRef<ConsoleHandle, { onCommand: (command: string) => AsyncGenerator<string> }>(function Console({ onCommand }, ref) {
+export const Console = forwardRef<ConsoleHandle, { onCommand: (command: string) => AsyncGenerator<string>, style?: React.CSSProperties }>(function Console({ onCommand, style }, ref) {
     const [input, setInput] = useState('');
     const [output, setOutput] = useState<string[]>([
         'Welcome to k8s.js! Try a few commands to get started:',
@@ -229,23 +229,36 @@ export const Console = forwardRef<ConsoleHandle, { onCommand: (command: string) 
     }
 
     return (
-        <div style={{ backgroundColor: '#1e1e1e', color: '#d4d4d4', fontFamily: 'monospace', fontSize: '16px', textAlign: 'left', height: '400px', display: 'flex', flexDirection: 'column', borderTop: '1px solid #333' }} onClick={handleConsoleClick}>
-            <div style={{ flex: 1, overflowY: 'auto', padding: '5px' }} ref={outputRef}>
-                {output.map((line, index) => (
-                    <div key={index} style={{ whiteSpace: 'pre-wrap' }}>{line || '\u00a0'}</div>
-                ))}
-                <div style={{ display: 'flex', alignItems: 'flex-start', visibility: inputQueue.length > 0 ? 'hidden' : 'visible' }}>
-                    <span style={{ paddingTop: '4px', lineHeight: '1.5' }}>{PROMPT}</span>
-                    <textarea
-                        value={input}
-                        onChange={handleInputChange}
-                        onKeyDown={handleKeyDown}
-                        rows={1}
-                        style={{ padding: '4px', marginLeft: '4px', backgroundColor: '#1e1e1e', color: '#d4d4d4', border: 'none', outline: 'none', flex: 1, fontFamily: 'monospace', fontSize: '16px', resize: 'none', overflow: 'hidden', lineHeight: '1.5' }}
-                        autoFocus
-                        ref={inputRef}
-                    />
-                </div>
+        <div style={{
+            backgroundColor: '#1e1e1e',
+            color: '#d4d4d4',
+            fontFamily: 'monospace',
+            fontSize: '16px',
+            textAlign: 'left',
+            display: 'flex',
+            flexDirection: 'column',
+            borderTop: '1px solid #333',
+            overflowY: 'auto',
+            padding: 5,
+            ...style
+        }}
+            onClick={handleConsoleClick}
+            ref={outputRef}
+        >
+            {output.map((line, index) => (
+                <div key={index} style={{ whiteSpace: 'pre-wrap' }}>{line || '\u00a0'}</div>
+            ))}
+            <div style={{ display: 'flex', alignItems: 'flex-start', visibility: inputQueue.length > 0 ? 'hidden' : 'visible' }}>
+                <span style={{ paddingTop: '4px', lineHeight: '1.5' }}>{PROMPT}</span>
+                <textarea
+                    value={input}
+                    onChange={handleInputChange}
+                    onKeyDown={handleKeyDown}
+                    rows={1}
+                    style={{ padding: '4px', marginLeft: '4px', backgroundColor: '#1e1e1e', color: '#d4d4d4', border: 'none', outline: 'none', flex: 1, fontFamily: 'monospace', fontSize: '16px', resize: 'none', overflow: 'hidden', lineHeight: '1.5' }}
+                    autoFocus
+                    ref={inputRef}
+                />
             </div>
         </div>
     );
