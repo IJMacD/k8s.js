@@ -36,6 +36,9 @@ export function useEndpointsController(
             const { name, namespace } = svc.metadata;
             const { selector, ports } = svc.spec;
 
+            // Skip services with empty selectors (manually managed endpoints like kubernetes service)
+            if (Object.keys(selector).length === 0) continue;
+
             // A pod matches if it is in the same namespace, is Running+Ready,
             // and has every selector label.
             const readyPods = Pods.filter(p => {
@@ -54,6 +57,7 @@ export function useEndpointsController(
             const subsetMap = new Map<string, EndpointSubset>();
             for (const pod of readyPods) {
                 const resolvedPorts = ports.map(p => ({
+                    name: p.name,
                     port: resolveTargetPort(p.targetPort, pod),
                     protocol: p.protocol,
                 }));

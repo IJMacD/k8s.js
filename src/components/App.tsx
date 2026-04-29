@@ -55,8 +55,52 @@ function makeInitialState(): AppState {
     DaemonSets: [],
     StatefulSets: [],
     Pods: [],
-    Services: [],
-    Endpoints: [],
+    Services: [
+      // Auto-created kubernetes API server service (present in all real clusters)
+      {
+        metadata: {
+          uid: crypto.randomUUID(),
+          name: 'kubernetes',
+          namespace: 'default',
+          labels: { 'component': 'apiserver', 'provider': 'kubernetes' },
+          annotations: {},
+          creationTimestamp: now,
+        },
+        spec: {
+          type: 'ClusterIP',
+          clusterIP: '10.96.0.1', // First IP in typical service CIDR
+          ports: [
+            { name: 'https', protocol: 'TCP', port: 443, targetPort: 6443 },
+          ],
+          selector: {}, // No selector - manually managed endpoints
+        },
+        status: {},
+      },
+    ],
+    Endpoints: [
+      // Endpoints for kubernetes service point to the "control plane"
+      {
+        metadata: {
+          uid: crypto.randomUUID(),
+          name: 'kubernetes',
+          namespace: 'default',
+          creationTimestamp: now,
+        },
+        subsets: [
+          {
+            addresses: [
+              {
+                ip: '192.168.0.254', // Special IP representing control plane
+                // No targetRef - it's the control plane, not a pod
+              },
+            ],
+            ports: [
+              { name: 'https', port: 6443, protocol: 'TCP' },
+            ],
+          },
+        ],
+      },
+    ],
     Nodes: [
       makeNode('node-1', '192.168.0.1', '10.244.0.0/24'),
       makeNode('node-2', '192.168.0.2', '10.244.1.0/24'),
@@ -271,7 +315,7 @@ function App() {
         </div>
         {/* Panels */}
         <Console ref={consoleRef} onCommand={handleCommand} style={{ flex: 1, display: bottomTab === 'terminal' ? undefined : 'none' }} />
-        <Browser state={store} style={{ flex: 1, display: bottomTab === 'browser' ? undefined : 'none' }} />
+        <Browser state={store} style={{ flex: 1, display: bottomTab === 'browser' ? 'flex' : 'none' }} />
         {editorSession && (
           <Editor
             key={editorSession.id}

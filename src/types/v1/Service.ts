@@ -38,15 +38,17 @@ export interface ServiceStatus {
 
 export interface Endpoints {
     metadata: {
+        uid?: string;
         name: string;
         namespace: string;
+        creationTimestamp?: string;
     };
     subsets: EndpointSubset[];
 }
 
 export interface EndpointSubset {
     addresses: EndpointAddress[];
-    ports: Array<{ port: number; protocol: "TCP" | "UDP" }>;
+    ports: Array<{ name?: string; port: number; protocol: "TCP" | "UDP" }>;
 }
 
 export interface EndpointAddress {

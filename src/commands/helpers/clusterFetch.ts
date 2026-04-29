@@ -53,6 +53,11 @@ export function clusterFetch(rawUrl: string, state: AppState): SimResponse | Sim
 
     const { target } = result;
 
+    // Special case: kubernetes API server service
+    if (target.resolvedIP === '192.168.0.254' && target.port === 6443) {
+        return handleKubernetesAPIRequest(path, host, port, target.dialIP, target.resolvedIP, state);
+    }
+
     if (target.phase !== "Running") {
         return { ok: false, kind: 'pod_not_ready', host, port: target.port, podName: target.podName, podPhase: target.phase, error: `Connection refused (Pod ${target.podName} is ${target.phase})` };
     }
@@ -156,6 +161,216 @@ export function clusterFetch(rawUrl: string, state: AppState): SimResponse | Sim
         resolvedIP: target.resolvedIP,
         podName: target.podName,
         viaService: target.viaService,
+    };
+}
+
+function handleKubernetesAPIRequest(
+    path: string,
+    host: string,
+    port: number,
+    dialIP: string,
+    resolvedIP: string,
+    state: AppState,
+): SimResponse {
+    const date = new Date().toUTCString();
+    const esc = (s: string) =>
+        s.replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+
+    // Handle root path - show available API paths
+    if (path === '/' || path === '') {
+        const apiPaths = ["/api", "/api/v1", "/healthz", "/livez", "/readyz", "/version"];
+        const body = JSON.stringify({ paths: apiPaths }, null, 2);
+
+        return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            headers: {
+                "Date": date,
+                "Content-Type": "application/json",
+                "Server": "k8s.js/1.0",
+            },
+            body,
+            host,
+            dialPort: port,
+            path,
+            dialIP,
+            resolvedIP,
+            podName: "kube-apiserver",
+            viaService: "kubernetes",
+        };
+    }
+
+    // Health checks
+    if (path === '/healthz' || path === '/livez' || path === '/readyz') {
+        return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            headers: {
+                "Date": date,
+                "Content-Type": "text/plain",
+                "Server": "k8s.js/1.0",
+            },
+            body: "ok",
+            host,
+            dialPort: port,
+            path,
+            dialIP,
+            resolvedIP,
+            podName: "kube-apiserver",
+            viaService: "kubernetes",
+        };
+    }
+
+    // Version endpoint
+    if (path === '/version') {
+        const body = JSON.stringify({
+            major: "1",
+            minor: "28",
+            gitVersion: "v1.28.0-k8s.js",
+            gitCommit: "simulator",
+            gitTreeState: "clean",
+            buildDate: "2024-01-01T00:00:00Z",
+            goVersion: "browser/wasm",
+            compiler: "typescript",
+            platform: "browser/wasm"
+        }, null, 2);
+
+        return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            headers: {
+                "Date": date,
+                "Content-Type": "application/json",
+                "Server": "k8s.js/1.0",
+            },
+            body,
+            host,
+            dialPort: port,
+            path,
+            dialIP,
+            resolvedIP,
+            podName: "kube-apiserver",
+            viaService: "kubernetes",
+        };
+    }
+
+    // API discovery endpoints
+    if (path === '/api' || path === '/api/') {
+        const body = JSON.stringify({
+            kind: "APIVersions",
+            versions: ["v1"],
+            serverAddressByClientCIDRs: [
+                { clientCIDR: "0.0.0.0/0", serverAddress: "192.168.0.254:6443" }
+            ]
+        }, null, 2);
+
+        return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            headers: {
+                "Date": date,
+                "Content-Type": "application/json",
+                "Server": "k8s.js/1.0",
+            },
+            body,
+            host,
+            dialPort: port,
+            path,
+            dialIP,
+            resolvedIP,
+            podName: "kube-apiserver",
+            viaService: "kubernetes",
+        };
+    }
+
+    // Serve a simulated API response with HTML documentation
+    if (path.startsWith('/api/v1')) {
+        const htmlBody = [
+            `<!DOCTYPE html>`,
+            `<html><head><title>Kubernetes API Server</title></head>`,
+            `<body style="font-family:sans-serif;padding:16px 24px;background:#1e1e1e;color:#d4d4d4">`,
+            `<h1 style="font-family:monospace;font-size:20px;color:#4ec9b0">🎛️ Kubernetes API Server</h1>`,
+            `<p style="font-family:monospace;font-size:13px;opacity:0.8">`,
+            `Service: <code style="color:#ce9178">kubernetes.default.svc.cluster.local</code><br>`,
+            `Endpoint: <code style="color:#ce9178">${esc(resolvedIP)}:6443</code><br>`,
+            `Path: <code style="color:#ce9178">${esc(path)}</code>`,
+            `</p>`,
+            `<div style="background:#252526;border:1px solid #3e3e42;border-radius:4px;padding:16px;margin-top:16px">`,
+            `<h2 style="font-family:monospace;font-size:14px;margin:0 0 12px;color:#569cd6">Available API Endpoints</h2>`,
+            `<ul style="font-family:monospace;font-size:12px;line-height:1.8;color:#9cdcfe">`,
+            `<li><a href="/" style="color:#4fc1ff">/</a> - List available paths</li>`,
+            `<li><a href="/api" style="color:#4fc1ff">/api</a> - List API versions</li>`,
+            `<li><a href="/version" style="color:#4fc1ff">/version</a> - Server version</li>`,
+            `<li><a href="/healthz" style="color:#4fc1ff">/healthz</a> - Health check</li>`,
+            `<li><a href="/livez" style="color:#4fc1ff">/livez</a> - Liveness check</li>`,
+            `<li><a href="/readyz" style="color:#4fc1ff">/readyz</a> - Readiness check</li>`,
+            `</ul>`,
+            `</div>`,
+            `<p style="font-family:monospace;font-size:11px;opacity:0.5;margin-top:24px">`,
+            `💡 <em>Tip:</em> In a real cluster, pods use service account tokens to authenticate to this API.<br>`,
+            `The token is mounted at <code>/var/run/secrets/kubernetes.io/serviceaccount/token</code>`,
+            `</p>`,
+            `<p style="font-family:monospace;font-size:11px;opacity:0.5;margin-top:8px">`,
+            `🔧 <em>Cluster State:</em> ${state.Pods.length} pods, ${state.Services.length} services, ${state.Nodes.length} nodes`,
+            `</p>`,
+            `</body></html>`,
+        ].join("\n");
+
+        return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            headers: {
+                "Date": date,
+                "Content-Type": "text/html",
+                "Server": "k8s.js/1.0",
+            },
+            body: htmlBody,
+            host,
+            dialPort: port,
+            path,
+            dialIP,
+            resolvedIP,
+            podName: "kube-apiserver",
+            viaService: "kubernetes",
+        };
+    }
+
+    // Default 404 for unknown paths
+    const body = JSON.stringify({
+        kind: "Status",
+        apiVersion: "v1",
+        status: "Failure",
+        message: `the server could not find the requested resource`,
+        reason: "NotFound",
+        code: 404
+    }, null, 2);
+
+    return {
+        ok: true,
+        status: 404,
+        statusText: "Not Found",
+        headers: {
+            "Date": date,
+            "Content-Type": "application/json",
+            "Server": "k8s.js/1.0",
+        },
+        body,
+        host,
+        dialPort: port,
+        path,
+        dialIP,
+        resolvedIP,
+        podName: "kube-apiserver",
+        viaService: "kubernetes",
     };
 }
 
@@ -333,6 +548,22 @@ function resolve(host: string, portHint: number, state: AppState): ResolveResult
         return { ok: false, reason: "port_refused", port: portHint };
     }
 
+    // -- 6. Control plane IP address
+    if (host === "192.168.0.254" && portHint === 6443) {
+        return {
+            ok: true,
+            target: {
+                podName: "kube-apiserver",
+                podNamespace: "default",
+                image: "k8s.gcr.io/kube-apiserver",
+                phase: "Running",
+                port: 6443,
+                dialIP: "192.168.0.254",
+                resolvedIP: "192.168.0.254",
+            },
+        };
+    }
+
     return { ok: false, reason: "not_found", port: portHint };
 }
 
@@ -356,6 +587,26 @@ function resolveViaService(svcName: string, svcNs: string, portHint: number, sta
     const pod = podRef
         ? state.Pods.find(p => p.metadata.name === podRef.name && p.metadata.namespace === podRef.namespace)
         : state.Pods.find(p => p.status.podIP === epAddress.ip);
+
+    // Special case: kubernetes service has no pod backend (it's the control plane)
+    if (!pod && svcName === "kubernetes" && svcNs === "default") {
+        const resolvedTargetPort = typeof svcPort.targetPort === "number"
+            ? svcPort.targetPort
+            : svcPort.port;
+        return {
+            ok: true,
+            target: {
+                podName: "kube-apiserver",
+                podNamespace: "default",
+                image: "k8s.gcr.io/kube-apiserver",
+                phase: "Running",
+                port: resolvedTargetPort,
+                dialIP: svc.spec.clusterIP,
+                resolvedIP: epAddress.ip,
+                viaService: svcName,
+            },
+        };
+    }
 
     if (!pod) return { ok: false, reason: "not_found", port: svcPort.port };
 

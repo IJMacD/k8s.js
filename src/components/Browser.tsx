@@ -48,12 +48,15 @@ export function Browser({ state, onDismiss, style }: { state: AppState; onDismis
     const canBack = cursor > 0;
     const canForward = cursor < history.length - 1;
 
+    const isTextResponse = current?.result?.ok && (current.result as SimResponse).headers["Content-Type"] !== "text/html";
+
     return (
         <div style={{
             display: "flex",
             flexDirection: "column",
             borderTop: "1px solid var(--border)",
             background: "var(--bg)",
+            overflow: "hidden",
             ...style,
         }}>
             {/* Chrome bar */}
@@ -95,8 +98,6 @@ export function Browser({ state, onDismiss, style }: { state: AppState; onDismis
                 >✕</button>
             </div>
 
-            {/* Viewport */}
-            <div style={{ flex: 1, overflow: "auto", position: "relative" }}>
                 {!current && (
                     <div style={{ padding: "32px", textAlign: "center", color: "var(--text)", opacity: 0.45 }}>
                         <div style={{ fontSize: "32px", marginBottom: "8px" }}>🌐</div>
@@ -137,6 +138,15 @@ export function Browser({ state, onDismiss, style }: { state: AppState; onDismis
                             {" · "}
                             Server: {(current.result as SimResponse).headers["Server"]}
                         </div>
+                    {/* Viewport */}
+                    <div style={{
+                        flex: 1,
+                        overflowY: "auto",
+                        position: "relative",
+                        fontFamily: isTextResponse ? "var(--mono)" : undefined,
+                        fontSize: isTextResponse ? "12px" : undefined,
+                        whiteSpace: isTextResponse ? "pre-wrap" : undefined,
+                    }}>
                         {/* Rendered body — intercept link clicks via event delegation */}
                         <div
                             style={{ padding: "16px 24px" }}
@@ -162,9 +172,9 @@ export function Browser({ state, onDismiss, style }: { state: AppState; onDismis
                             // before being placed in the body string.
                             dangerouslySetInnerHTML={{ __html: (current.result as SimResponse).body }}
                         />
-                    </>
-                )}
-            </div>
+                    </div>
+                </>
+            )}
         </div>
     );
 }
