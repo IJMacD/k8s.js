@@ -15,11 +15,8 @@ export async function* kubectlRollout(
         const resourceArg = args[2];
         if (!resourceArg) throw Error("kubectl rollout status: specify a resource (e.g. deployment/<name>)");
 
-        // Only deployments supported for now
         const kind = resourceArg.includes("/") ? resourceArg.split("/")[0].toLowerCase() : "deployment";
         const name = resourceArg.includes("/") ? resourceArg.split("/")[1] : (args[3] ?? resourceArg);
-        if (kind !== "deployment" && kind !== "deploy")
-            throw Error("kubectl rollout status: only deployments are supported");
 
         // Parse --timeout=<N>s (default 300s), --watch=false disables waiting
         const timeoutFlag = args.find(a => a.startsWith("--timeout="));
@@ -28,54 +25,165 @@ export async function* kubectlRollout(
             : 300_000;
         const noWatch = args.includes("--watch=false") || args.includes("--no-wait");
 
-        const d = state.Deployments.find(
-            dep => dep.metadata.name === name && dep.metadata.namespace === namespace,
-        );
-        if (!d) throw Error(`Error from server (NotFound): deployments "${name}" not found`);
+        const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
-        const isComplete = (s: AppState) => {
-            const dep = s.Deployments.find(
+        // Handle Deployment
+        if (kind === "deployment" || kind === "deploy") {
+            const d = state.Deployments.find(
                 dep => dep.metadata.name === name && dep.metadata.namespace === namespace,
             );
-            if (!dep) return false;
-            return dep.status.updatedReplicas >= dep.spec.replicas &&
-                dep.status.readyReplicas >= dep.spec.replicas &&
-                dep.status.availableReplicas >= dep.spec.replicas;
-        };
+            if (!d) throw Error(`Error from server (NotFound): deployments "${name}" not found`);
 
-        if (noWatch) {
-            if (isComplete(state)) {
-                yield `deployment "${name}" successfully rolled out`; return;
-            }
-            yield `Waiting for deployment "${name}" rollout to finish: ${d.status.readyReplicas} of ${d.spec.replicas} updated replicas are available...`; return;
-        }
+            const isComplete = (s: AppState) => {
+                const dep = s.Deployments.find(
+                    dep => dep.metadata.name === name && dep.metadata.namespace === namespace,
+                );
+                if (!dep) return false;
+                return dep.status.updatedReplicas >= dep.spec.replicas &&
+                    dep.status.readyReplicas >= dep.spec.replicas &&
+                    dep.status.availableReplicas >= dep.spec.replicas;
+            };
 
-        // Poll live state; only yield a line when the status message changes (matches real kubectl behaviour)
-        const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
-        const deadline = Date.now() + timeoutMs;
-        let lastLine = '';
-        while (true) {
-            const current = getState();
-            if (isComplete(current)) {
-                yield `deployment "${name}" successfully rolled out`;
-                return;
+            if (noWatch) {
+                if (isComplete(state)) {
+                    yield `deployment "${name}" successfully rolled out`; return;
+                }
+                yield `Waiting for deployment "${name}" rollout to finish: ${d.status.readyReplicas} of ${d.spec.replicas} updated replicas are available...`; return;
             }
-            if (Date.now() >= deadline) {
+
+            // Poll live state; only yield a line when the status message changes (matches real kubectl behaviour)
+            const deadline = Date.now() + timeoutMs;
+            let lastLine = '';
+            while (true) {
+                const current = getState();
+                if (isComplete(current)) {
+                    yield `deployment "${name}" successfully rolled out`;
+                    return;
+                }
+                if (Date.now() >= deadline) {
+                    const dep = current.Deployments.find(
+                        dep => dep.metadata.name === name && dep.metadata.namespace === namespace,
+                    );
+                    throw new Error(`error: timed out waiting for the condition on deployments/${name}\n(${dep?.status.readyReplicas ?? 0}/${dep?.spec.replicas ?? 0} replicas available)`);
+                }
                 const dep = current.Deployments.find(
                     dep => dep.metadata.name === name && dep.metadata.namespace === namespace,
                 );
-                throw new Error(`error: timed out waiting for the condition on deployments/${name}\n(${dep?.status.readyReplicas ?? 0}/${dep?.spec.replicas ?? 0} replicas available)`);
+                const line = `Waiting for deployment "${name}" rollout to finish: ${dep?.status.readyReplicas ?? 0}/${dep?.spec.replicas ?? 0} updated replicas are available...`;
+                if (line !== lastLine) {
+                    yield line;
+                    lastLine = line;
+                }
+                await sleep(500);
             }
-            const dep = current.Deployments.find(
-                dep => dep.metadata.name === name && dep.metadata.namespace === namespace,
-            );
-            const line = `Waiting for deployment "${name}" rollout to finish: ${dep?.status.readyReplicas ?? 0}/${dep?.spec.replicas ?? 0} updated replicas are available...`;
-            if (line !== lastLine) {
-                yield line;
-                lastLine = line;
-            }
-            await sleep(500);
         }
+
+        // Handle DaemonSet
+        if (kind === "daemonset" || kind === "ds") {
+            const ds = state.DaemonSets.find(
+                d => d.metadata.name === name && d.metadata.namespace === namespace,
+            );
+            if (!ds) throw Error(`Error from server (NotFound): daemonsets "${name}" not found`);
+
+            const isComplete = (s: AppState) => {
+                const daemonset = s.DaemonSets.find(
+                    d => d.metadata.name === name && d.metadata.namespace === namespace,
+                );
+                if (!daemonset) return false;
+                return daemonset.status.updatedNumberScheduled >= daemonset.status.desiredNumberScheduled &&
+                    daemonset.status.numberReady >= daemonset.status.desiredNumberScheduled &&
+                    daemonset.status.numberAvailable >= daemonset.status.desiredNumberScheduled &&
+                    daemonset.status.observedGeneration >= daemonset.metadata.generation;
+            };
+
+            if (noWatch) {
+                if (isComplete(state)) {
+                    yield `daemon set "${name}" successfully rolled out`; return;
+                }
+                yield `Waiting for daemon set "${name}" rollout to finish: ${ds.status.numberReady} of ${ds.status.desiredNumberScheduled} updated pods are available...`; return;
+            }
+
+            const deadline = Date.now() + timeoutMs;
+            let lastLine = '';
+            while (true) {
+                const current = getState();
+                if (isComplete(current)) {
+                    yield `daemon set "${name}" successfully rolled out`;
+                    return;
+                }
+                if (Date.now() >= deadline) {
+                    const daemonset = current.DaemonSets.find(
+                        d => d.metadata.name === name && d.metadata.namespace === namespace,
+                    );
+                    throw new Error(`error: timed out waiting for the condition on daemonsets/${name}\n(${daemonset?.status.numberReady ?? 0}/${daemonset?.status.desiredNumberScheduled ?? 0} pods available)`);
+                }
+                const daemonset = current.DaemonSets.find(
+                    d => d.metadata.name === name && d.metadata.namespace === namespace,
+                );
+                const line = `Waiting for daemon set "${name}" rollout to finish: ${daemonset?.status.numberReady ?? 0} of ${daemonset?.status.desiredNumberScheduled ?? 0} updated pods are available...`;
+                if (line !== lastLine) {
+                    yield line;
+                    lastLine = line;
+                }
+                await sleep(500);
+            }
+        }
+
+        // Handle StatefulSet
+        if (kind === "statefulset" || kind === "sts" || kind === "ss") {
+            const sts = state.StatefulSets.find(
+                s => s.metadata.name === name && s.metadata.namespace === namespace,
+            );
+            if (!sts) throw Error(`Error from server (NotFound): statefulsets "${name}" not found`);
+
+            const isComplete = (s: AppState) => {
+                const statefulset = s.StatefulSets.find(
+                    st => st.metadata.name === name && st.metadata.namespace === namespace,
+                );
+                if (!statefulset) return false;
+                return statefulset.status.updatedReplicas >= statefulset.spec.replicas &&
+                    statefulset.status.readyReplicas >= statefulset.spec.replicas &&
+                    statefulset.status.availableReplicas >= statefulset.spec.replicas &&
+                    statefulset.status.observedGeneration >= statefulset.metadata.generation;
+            };
+
+            if (noWatch) {
+                if (isComplete(state)) {
+                    yield `statefulset rolling update complete ${sts.spec.replicas} pods at revision ${sts.status.updateRevision ?? sts.status.currentRevision ?? "unknown"}...`; return;
+                }
+                yield `Waiting for ${sts.spec.replicas} pods to be ready...`; return;
+            }
+
+            const deadline = Date.now() + timeoutMs;
+            let lastLine = '';
+            while (true) {
+                const current = getState();
+                if (isComplete(current)) {
+                    const statefulset = current.StatefulSets.find(
+                        st => st.metadata.name === name && st.metadata.namespace === namespace,
+                    );
+                    yield `statefulset rolling update complete ${statefulset?.spec.replicas ?? 0} pods at revision ${statefulset?.status.updateRevision ?? statefulset?.status.currentRevision ?? "unknown"}...`;
+                    return;
+                }
+                if (Date.now() >= deadline) {
+                    const statefulset = current.StatefulSets.find(
+                        st => st.metadata.name === name && st.metadata.namespace === namespace,
+                    );
+                    throw new Error(`error: timed out waiting for the condition on statefulsets/${name}\n(${statefulset?.status.readyReplicas ?? 0}/${statefulset?.spec.replicas ?? 0} replicas available)`);
+                }
+                const statefulset = current.StatefulSets.find(
+                    st => st.metadata.name === name && st.metadata.namespace === namespace,
+                );
+                const line = `Waiting for ${statefulset?.spec.replicas ?? 0} pods to be ready...`;
+                if (line !== lastLine) {
+                    yield line;
+                    lastLine = line;
+                }
+                await sleep(500);
+            }
+        }
+
+        throw Error(`kubectl rollout status: resource type "${kind}" is not supported`);
     }
 
     if (subCmd === "undo") {
@@ -133,30 +241,82 @@ export async function* kubectlRollout(
 
         const kind = resourceArg.includes("/") ? resourceArg.split("/")[0].toLowerCase() : "deployment";
         const name = resourceArg.includes("/") ? resourceArg.split("/")[1] : (args[3] ?? resourceArg);
-        if (kind !== "deployment" && kind !== "deploy")
-            throw Error("kubectl rollout restart: only deployments are supported");
-
-        const deployment = state.Deployments.find(
-            d => d.metadata.name === name && d.metadata.namespace === namespace,
-        );
-        if (!deployment) throw Error(`Error from server (NotFound): deployments "${name}" not found`);
-
+        
         const restartedAt = new Date().toISOString();
-        dispatch(patchResource("deployment", name, {
-            metadata: { generation: deployment.metadata.generation + 1 },
-            spec: {
-                template: {
-                    metadata: {
-                        annotations: {
-                            ...(deployment.spec.template.metadata?.annotations ?? {}),
-                            "kubectl.kubernetes.io/restartedAt": restartedAt,
+
+        // Handle Deployment
+        if (kind === "deployment" || kind === "deploy") {
+            const deployment = state.Deployments.find(
+                d => d.metadata.name === name && d.metadata.namespace === namespace,
+            );
+            if (!deployment) throw Error(`Error from server (NotFound): deployments "${name}" not found`);
+
+            dispatch(patchResource("deployment", name, {
+                metadata: { generation: deployment.metadata.generation + 1 },
+                spec: {
+                    template: {
+                        metadata: {
+                            annotations: {
+                                ...(deployment.spec.template.metadata?.annotations ?? {}),
+                                "kubectl.kubernetes.io/restartedAt": restartedAt,
+                            },
                         },
                     },
                 },
-            },
-        }, namespace));
-        yield `deployment.apps/${name} restarted`;
-        return;
+            }, namespace));
+            yield `deployment.apps/${name} restarted`;
+            return;
+        }
+
+        // Handle DaemonSet
+        if (kind === "daemonset" || kind === "ds") {
+            const daemonset = state.DaemonSets.find(
+                ds => ds.metadata.name === name && ds.metadata.namespace === namespace,
+            );
+            if (!daemonset) throw Error(`Error from server (NotFound): daemonsets "${name}" not found`);
+
+            dispatch(patchResource("daemonset", name, {
+                metadata: { generation: daemonset.metadata.generation + 1 },
+                spec: {
+                    template: {
+                        metadata: {
+                            annotations: {
+                                ...(daemonset.spec.template.metadata?.annotations ?? {}),
+                                "kubectl.kubernetes.io/restartedAt": restartedAt,
+                            },
+                        },
+                    },
+                },
+            }, namespace));
+            yield `daemonset.apps/${name} restarted`;
+            return;
+        }
+
+        // Handle StatefulSet
+        if (kind === "statefulset" || kind === "sts" || kind === "ss") {
+            const statefulset = state.StatefulSets.find(
+                sts => sts.metadata.name === name && sts.metadata.namespace === namespace,
+            );
+            if (!statefulset) throw Error(`Error from server (NotFound): statefulsets "${name}" not found`);
+
+            dispatch(patchResource("statefulset", name, {
+                metadata: { generation: statefulset.metadata.generation + 1 },
+                spec: {
+                    template: {
+                        metadata: {
+                            annotations: {
+                                ...(statefulset.spec.template.metadata?.annotations ?? {}),
+                                "kubectl.kubernetes.io/restartedAt": restartedAt,
+                            },
+                        },
+                    },
+                },
+            }, namespace));
+            yield `statefulset.apps/${name} restarted`;
+            return;
+        }
+
+        throw Error(`kubectl rollout restart: resource type "${kind}" is not supported`);
     }
 
     if (subCmd === "history") {
