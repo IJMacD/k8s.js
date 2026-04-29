@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { clusterFetch, type SimError, type SimResponse } from "../commands/curl";
+import { clusterFetch, type SimError, type SimResponse } from "../commands/helpers/clusterFetch";
 import type { AppState } from "../store/store";
 
 type NavEntry = { url: string; result: SimResponse | SimError | null };
