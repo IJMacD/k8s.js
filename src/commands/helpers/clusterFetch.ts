@@ -685,8 +685,31 @@ function resolveVolumeFetch(
                 data = state.Secrets.find(
                     s => s.metadata.name === vol.secret!.secretName && s.metadata.namespace === ns,
                 )?.data;
+            } else if (vol.downwardAPI) {
+                // Construct data from downwardAPI items
+                data = {};
+                for (const item of vol.downwardAPI.items ?? []) {
+                    if (item.fieldRef) {
+                        data[item.path] = resolveFieldRef(item.fieldRef.fieldPath, pod);
+                    } else if (item.resourceFieldRef) {
+                        // For now, we'll provide placeholder values for resource fields
+                        // In a real implementation, these would come from container resource limits/requests
+                        const resource = item.resourceFieldRef.resource;
+                        if (resource === "limits.cpu") {
+                            data[item.path] = container.resources?.limits?.cpu ?? "1";
+                        } else if (resource === "limits.memory") {
+                            data[item.path] = container.resources?.limits?.memory ?? "512Mi";
+                        } else if (resource === "requests.cpu") {
+                            data[item.path] = container.resources?.requests?.cpu ?? "100m";
+                        } else if (resource === "requests.memory") {
+                            data[item.path] = container.resources?.requests?.memory ?? "128Mi";
+                        } else {
+                            data[item.path] = `(${resource})`;
+                        }
+                    }
+                }
             }
-            if (!data) continue; // not a configMap/secret-backed volume
+            if (!data) continue; // not a configMap/secret/downwardAPI-backed volume
 
             if (isDirMount) {
                 const filename = requestPath === "/" || requestPath === ""
@@ -742,6 +765,25 @@ function contentTypeForFilename(filename: string): string {
 // Resolve all env vars for the first container of a pod.
 // envFrom is expanded first (lower priority); env entries override.
 // ---------------------------------------------------------------------------
+function resolveFieldRef(fieldPath: string, pod: AppState["Pods"][number]): string {
+    switch (fieldPath) {
+        case "metadata.name":      return pod.metadata.name;
+        case "metadata.namespace": return pod.metadata.namespace;
+        case "metadata.uid":       return pod.metadata.uid;
+        case "status.podIP":       return pod.status.podIP ?? "";
+        case "status.hostIP":      return pod.status.hostIP ?? "";
+        case "spec.nodeName":      return pod.spec.nodeName ?? "";
+        case "spec.serviceAccountName": return pod.spec.serviceAccountName ?? "default";
+        default: {
+            const lm = fieldPath.match(/^metadata\.labels\['(.+)'\]$/);
+            if (lm) return pod.metadata.labels?.[lm[1]] ?? "";
+            const am = fieldPath.match(/^metadata\.annotations\['(.+)'\]$/);
+            if (am) return pod.metadata.annotations?.[am[1]] ?? "";
+            return `(${fieldPath})`;
+        }
+    }
+}
+
 function resolveEnv(pod: AppState["Pods"][number], state: AppState): Array<[string, string]> {
     const container = pod.spec.containers[0];
     if (!container) return [];
@@ -779,22 +821,7 @@ function resolveEnv(pod: AppState["Pods"][number], state: AppState): Array<[stri
             );
             resolved[e.name] = secret?.data[ref.key] ?? "";
         } else if (e.valueFrom?.fieldRef) {
-            const fp = e.valueFrom.fieldRef.fieldPath;
-            switch (fp) {
-                case "metadata.name":      resolved[e.name] = pod.metadata.name; break;
-                case "metadata.namespace": resolved[e.name] = pod.metadata.namespace; break;
-                case "metadata.uid":       resolved[e.name] = pod.metadata.uid; break;
-                case "status.podIP":       resolved[e.name] = pod.status.podIP ?? ""; break;
-                case "status.hostIP":      resolved[e.name] = pod.status.hostIP ?? ""; break;
-                case "spec.nodeName":      resolved[e.name] = pod.spec.nodeName ?? ""; break;
-                default: {
-                    const lm = fp.match(/^metadata\.labels\['(.+)'\]$/);
-                    if (lm) { resolved[e.name] = pod.metadata.labels?.[lm[1]] ?? ""; break; }
-                    const am = fp.match(/^metadata\.annotations\['(.+)'\]$/);
-                    if (am) { resolved[e.name] = pod.metadata.annotations?.[am[1]] ?? ""; break; }
-                    resolved[e.name] = `(${fp})`;
-                }
-            }
+            resolved[e.name] = resolveFieldRef(e.valueFrom.fieldRef.fieldPath, pod);
         }
     }
 

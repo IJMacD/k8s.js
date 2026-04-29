@@ -69,6 +69,19 @@ export interface Volume {
     secret?: { secretName: string; defaultMode?: number };
     emptyDir?: { medium?: string; sizeLimit?: string };
     hostPath?: { path: string; type?: string };
+    downwardAPI?: { items?: DownwardAPIVolumeFile[]; defaultMode?: number };
+}
+
+export interface DownwardAPIVolumeFile {
+    path: string;
+    fieldRef?: ObjectFieldSelector;
+    resourceFieldRef?: ResourceFieldSelector;
+}
+
+export interface ResourceFieldSelector {
+    containerName?: string;
+    resource: string;
+    divisor?: string;
 }
 
 export interface LocalObjectReference {
@@ -79,6 +92,7 @@ export interface PodSpec {
     nodeName?: string; // Name of the node the pod is scheduled on
     nodeSelector?: Record<string, string>; // Node label selector constraints for scheduling
     restartPolicy?: "Always" | "OnFailure" | "Never";
+    serviceAccountName?: string; // Name of the ServiceAccount to use for this pod
     imagePullSecrets?: LocalObjectReference[]; // Secrets used to pull container images from private registries
     initContainers?: Container[]; // Optional list of init containers that run before app containers
     containers: Container[]; // List of containers that will be part of the pod

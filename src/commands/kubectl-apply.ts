@@ -107,6 +107,9 @@ function parseTemplate(rawTemplate: unknown, defaultName: string, defaultNamespa
         ...(v.hostPath && typeof v.hostPath === "object"
             ? { hostPath: v.hostPath as Volume["hostPath"] }
             : {}),
+        ...(v.downwardAPI && typeof v.downwardAPI === "object"
+            ? { downwardAPI: v.downwardAPI as Volume["downwardAPI"] }
+            : {}),
     }));
     return {
         metadata: {
