@@ -21,6 +21,7 @@ import { useCronJobController } from '../controllers/useCronJobController';
 import { useDaemonSetController } from '../controllers/useDaemonSetController'
 import { useStatefulSetController } from '../controllers/useStatefulSetController';
 import { useServiceController } from '../controllers/useServiceController';
+import { useKubernetesServiceController } from '../controllers/useKubernetesServiceController';
 import { usePVCBinder } from '../controllers/usePVCBinder';
 import { useLocalPathProvisioner } from '../controllers/useLocalPathProvisioner';
 import { useSavedState } from '../hooks/useSavedState';
@@ -55,52 +56,8 @@ function makeInitialState(): AppState {
     DaemonSets: [],
     StatefulSets: [],
     Pods: [],
-    Services: [
-      // Auto-created kubernetes API server service (present in all real clusters)
-      {
-        metadata: {
-          uid: crypto.randomUUID(),
-          name: 'kubernetes',
-          namespace: 'default',
-          labels: { 'component': 'apiserver', 'provider': 'kubernetes' },
-          annotations: {},
-          creationTimestamp: now,
-        },
-        spec: {
-          type: 'ClusterIP',
-          clusterIP: '10.96.0.1', // First IP in typical service CIDR
-          ports: [
-            { name: 'https', protocol: 'TCP', port: 443, targetPort: 6443 },
-          ],
-          selector: {}, // No selector - manually managed endpoints
-        },
-        status: {},
-      },
-    ],
-    Endpoints: [
-      // Endpoints for kubernetes service point to the "control plane"
-      {
-        metadata: {
-          uid: crypto.randomUUID(),
-          name: 'kubernetes',
-          namespace: 'default',
-          creationTimestamp: now,
-        },
-        subsets: [
-          {
-            addresses: [
-              {
-                ip: '192.168.0.254', // Special IP representing control plane
-                // No targetRef - it's the control plane, not a pod
-              },
-            ],
-            ports: [
-              { name: 'https', port: 6443, protocol: 'TCP' },
-            ],
-          },
-        ],
-      },
-    ],
+    Services: [],
+    Endpoints: [],
     Nodes: [
       makeNode('node-1', '192.168.0.1', '10.244.0.0/24'),
       makeNode('node-2', '192.168.0.2', '10.244.1.0/24'),
@@ -156,6 +113,7 @@ function App() {
   useReplicaSetController(store, dispatch);
   useKubelet(store, dispatch);
   useEndpointsController(store, dispatch);
+  useKubernetesServiceController(store, dispatch);
   useScheduler(store, dispatch);
   useJobController(store, dispatch);
   useCronJobController(store, dispatch);
