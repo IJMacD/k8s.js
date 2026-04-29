@@ -7,6 +7,22 @@ import { createPod, deletePod, updateDaemonSetStatus } from "../store/store";
 const RECONCILE_DELAY_MS = 2_000;
 
 /**
+ * Computes a stable hash of a pod template spec for change detection.
+ */
+function podTemplateHash(template: import("../types/v1/Pod").PodTemplateSpec): string {
+    const sortedReplacer = (_key: string, value: unknown) =>
+        value !== null && typeof value === "object" && !Array.isArray(value)
+            ? Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)))
+            : value;
+    const str = JSON.stringify(template, sortedReplacer);
+    let hash = 5381;
+    for (let i = 0; i < str.length; i++) {
+        hash = ((hash << 5) + hash) ^ str.charCodeAt(i);
+    }
+    return (hash >>> 0).toString(16).padStart(7, "0").slice(0, 7);
+}
+
+/**
  * Simulates the Kubernetes DaemonSet controller.
  * Ensures exactly one pod per schedulable node for each DaemonSet.
  * Pods are pre-bound to their target node (bypassing the scheduler).
@@ -40,6 +56,7 @@ export function useDaemonSetController(
 
         for (const ds of DaemonSets) {
             const { name, namespace, uid } = ds.metadata;
+            const currentHash = podTemplateHash(ds.spec.template);
 
             const ownedPods = Pods.filter(
                 p =>
@@ -47,23 +64,52 @@ export function useDaemonSetController(
                     p.metadata.ownerReferences?.some(r => r.kind === "DaemonSet" && r.name === name),
             );
 
+            // Group pods by node
+            const podsByNode = new Map<string, typeof ownedPods[0]>();
+            for (const pod of ownedPods) {
+                if (pod.spec.nodeName) {
+                    podsByNode.set(pod.spec.nodeName, pod);
+                }
+            }
+
             // Ensure one pod per schedulable node
             for (const node of schedulableNodes) {
-                const hasPod = ownedPods.some(p => p.spec.nodeName === node.metadata.name);
-                if (!hasPod) {
+                const nodeName = node.metadata.name;
+                const existingPod = podsByNode.get(nodeName);
 
+                if (!existingPod) {
+                    // No pod on this node - create one
                     timers.push(setTimeout(() => {
                         const podName = `${name}-${crypto.randomUUID().slice(0, 5)}`;
                         dispatch(createPod(
                             podName,
                             {
-                                metadata: { labels: { ...ds.metadata.labels } },
-                                spec: { ...ds.spec.template.spec, nodeName: node.metadata.name },
+                                metadata: {
+                                    labels: {
+                                        ...ds.spec.template.metadata?.labels,
+                                        "controller-revision-hash": currentHash,
+                                    },
+                                },
+                                spec: { ...ds.spec.template.spec, nodeName },
                             },
                             namespace,
                             { kind: "DaemonSet", apiVersion: "apps/v1", name, uid },
                         ));
                     }, RECONCILE_DELAY_MS));
+                } else {
+                    // Pod exists - check if template has changed
+                    const podHash = existingPod.metadata.labels?.["controller-revision-hash"];
+                    // If pod has no hash label (legacy pod) or hash doesn't match, it needs updating
+                    if (!podHash || podHash !== currentHash) {
+                        // Template changed - handle based on update strategy
+                        if (ds.spec.updateStrategy.type === "RollingUpdate") {
+                            // Delete the old pod, controller will recreate it on next pass
+                            timers.push(setTimeout(() => {
+                                dispatch(deletePod(existingPod.metadata.name, namespace));
+                            }, RECONCILE_DELAY_MS));
+                        }
+                        // OnDelete: do nothing, user must manually delete pods
+                    }
                 }
             }
 
