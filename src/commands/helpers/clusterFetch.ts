@@ -789,6 +789,39 @@ function resolveEnv(pod: AppState["Pods"][number], state: AppState): Array<[stri
     if (!container) return [];
     const resolved: Record<string, string> = {};
 
+    // Inject service environment variables for all services in the same namespace.
+    // Mimics real kubelet behavior: services that exist when the pod starts are
+    // made discoverable via env vars (in addition to DNS).
+    for (const svc of state.Services.filter(s => s.metadata.namespace === pod.metadata.namespace)) {
+        const svcName = svc.metadata.name.toUpperCase().replace(/-/g, '_');
+        const clusterIP = svc.spec.clusterIP;
+        const ports = svc.spec.ports;
+
+        if (ports.length > 0) {
+            const firstPort = ports[0];
+            resolved[`${svcName}_SERVICE_HOST`] = clusterIP;
+            resolved[`${svcName}_SERVICE_PORT`] = String(firstPort.port);
+            resolved[`${svcName}_PORT`] = `tcp://${clusterIP}:${firstPort.port}`;
+
+            for (const port of ports) {
+                // Named port: SERVICE_PORT_<PORTNAME>
+                if (port.name) {
+                    const portNameUpper = port.name.toUpperCase().replace(/-/g, '_');
+                    resolved[`${svcName}_SERVICE_PORT_${portNameUpper}`] = String(port.port);
+                }
+
+                // Per-port detailed env vars
+                const proto = port.protocol || 'TCP';
+                const protoLower = proto.toLowerCase();
+                const portProto = `${svcName}_PORT_${port.port}_${proto}`;
+                resolved[portProto] = `${protoLower}://${clusterIP}:${port.port}`;
+                resolved[`${portProto}_PROTO`] = protoLower;
+                resolved[`${portProto}_PORT`] = String(port.port);
+                resolved[`${portProto}_ADDR`] = clusterIP;
+            }
+        }
+    }
+
     for (const ef of container.envFrom ?? []) {
         const prefix = ef.prefix ?? "";
         if (ef.configMapRef) {

@@ -283,6 +283,33 @@ nslookup web.default.svc.cluster.local
 nslookup db-0.db.default.svc.cluster.local
 ```
 
+### Service environment variables
+
+```sh
+# Services are discoverable via DNS (above) and also via environment variables.
+# When a pod starts, the kubelet injects env vars for all services in the same namespace.
+
+# Create some services first
+kubectl create service clusterip redis-master --tcp=6379:6379
+kubectl create deployment app --image=nginx --replicas=1
+
+# Wait for pod to be ready, then get its IP
+kubectl get pods -o wide
+
+# Curl the pod to see its environment (includes auto-injected service vars)
+curl http://<pod-ip>
+
+# The Environment section will show:
+#   REDIS_MASTER_SERVICE_HOST=10.96.x.x
+#   REDIS_MASTER_SERVICE_PORT=6379
+#   REDIS_MASTER_PORT=tcp://10.96.x.x:6379
+#   KUBERNETES_SERVICE_HOST=10.96.0.1
+#   KUBERNETES_SERVICE_PORT=443
+#   ... (plus detailed PORT_<port>_<proto> variants)
+
+# See examples/service-env-vars-demo.yaml for a full demonstration
+```
+
 ### Patching, labelling & editing
 
 ```sh
