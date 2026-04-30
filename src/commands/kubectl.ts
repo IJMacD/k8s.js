@@ -17,6 +17,7 @@ import { kubectlScale } from "./kubectl-scale";
 import { kubectlLabel } from "./kubectl-label";
 import { kubectlAnnotate } from "./kubectl-annotate";
 import { kubectlSet } from "./kubectl-set";
+import { kubectlCp } from "./kubectl-cp";
 import type { EditorMode } from "../components/Editor";
 
 /**
@@ -104,6 +105,10 @@ export async function* kubectl(
     }
     if (args[0] === "edit") {
         yield* kubectlEdit(args, namespace, state, openEditor);
+        return;
+    }
+    if (args[0] === "cp") {
+        yield* kubectlCp(args, namespace, state, dispatch);
         return;
     }
     throw Error(`kubectl: Unknown subcommand ${args[0]}`);

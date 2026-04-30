@@ -33,11 +33,19 @@ export interface AppState {
     PersistentVolumeClaims: PersistentVolumeClaim[];
     StorageClasses: StorageClass[];
     Events: KubeEvent[];
+    Filesystems: {
+        Ephemeral: Record<string, Record<string, string>>; // containerKey (namespace/name/container) -> (path -> content)
+        PVFilesystems: Record<string, Record<string, string>>; // pvName -> (path -> content)
+        EmptyDir: Record<string, Record<string, string>>; // podKey (namespace/name/volumeName) -> (path -> content)
+    }
 }
 
 const CreateDeploymentType = "CREATE_DEPLOYMENT";
 const CreatePodType = "CREATE_POD";
 const DeletePodType = "DELETE_POD";
+const WriteEphemeralFileType = "WRITE_EPHEMERAL_FILE";
+const WritePVFileType = "WRITE_PV_FILE";
+const WriteEmptyDirFileType = "WRITE_EMPTYDIR_FILE";
 const ScaleDeploymentType = "SCALE_DEPLOYMENT";
 const CreateReplicaSetType = "CREATE_REPLICASET";
 const ScaleReplicaSetType = "SCALE_REPLICASET";
@@ -87,6 +95,8 @@ export type ActionType =
     | typeof CreateDeploymentType
     | typeof CreatePodType
     | typeof DeletePodType
+    | typeof WriteEphemeralFileType
+    | typeof WritePVFileType
     | typeof ScaleDeploymentType
     | typeof CreateReplicaSetType
     | typeof ScaleReplicaSetType
@@ -340,6 +350,9 @@ export type Action =
     | CreateDeploymentAction
     | CreatePodAction
     | DeletePodAction
+    | WriteEphemeralFileAction
+    | WritePVFileAction
+    | WriteEmptyDirFileAction
     | ScaleDeploymentAction
     | CreateReplicaSetAction
     | ScaleReplicaSetAction
@@ -741,6 +754,33 @@ export function deletePod(name: string, namespace = "default"): DeletePodAction 
     return { type: DeletePodType, payload: { name, namespace } };
 }
 
+export interface WriteEphemeralFileAction {
+    type: typeof WriteEphemeralFileType;
+    payload: { name: string; namespace: string; container: string; path: string; content: string };
+}
+
+export function writeEphemeralFile(name: string, namespace: string, container: string, path: string, content: string): WriteEphemeralFileAction {
+    return { type: WriteEphemeralFileType, payload: { name, namespace, container, path, content } };
+}
+
+export interface WritePVFileAction {
+    type: typeof WritePVFileType;
+    payload: { pvName: string; path: string; content: string };
+}
+
+export function writePVFile(pvName: string, path: string, content: string): WritePVFileAction {
+    return { type: WritePVFileType, payload: { pvName, path, content } };
+}
+
+export interface WriteEmptyDirFileAction {
+    type: typeof WriteEmptyDirFileType;
+    payload: { podName: string; namespace: string; volumeName: string; path: string; content: string };
+}
+
+export function writeEmptyDirFile(podName: string, namespace: string, volumeName: string, path: string, content: string): WriteEmptyDirFileAction {
+    return { type: WriteEmptyDirFileType, payload: { podName, namespace, volumeName, path, content } };
+}
+
 export interface CreateReplicaSetAction {
     type: typeof CreateReplicaSetType;
     payload: {
@@ -1038,11 +1078,43 @@ export const reducer = (state: AppState, action: Action): AppState => {
     }
     if (action.type === DeletePodType) {
         const { name, namespace } = action.payload;
+        const podPrefix = `${namespace}/${name}/`;
+        // Remove all container filesystems for this pod
+        const remainingFilesystems = Object.fromEntries(
+            Object.entries(state.Filesystems.Ephemeral).filter(([key]) => !key.startsWith(podPrefix))
+        );
+        // Remove all emptyDir volumes for this pod
+        const remainingEmptyDirFilesystems = Object.fromEntries(
+            Object.entries(state.Filesystems.EmptyDir).filter(([key]) => !key.startsWith(podPrefix))
+        );
         return {
             ...state,
             Pods: state.Pods.filter(
                 p => !(p.metadata.name === name && p.metadata.namespace === namespace),
             ),
+            Filesystems: {
+                ...state.Filesystems,
+                Ephemeral: remainingFilesystems,
+                EmptyDir: remainingEmptyDirFilesystems,
+            },
+        };
+    }
+    if (action.type === WriteEphemeralFileType) {
+        const { name, namespace, container, path, content } = action.payload;
+        const containerKey = `${namespace}/${name}/${container}`;
+        const currentFiles = state.Filesystems.Ephemeral[containerKey] || {};
+        return {
+            ...state,
+            Filesystems: {
+                ...state.Filesystems,
+                Ephemeral: {
+                    ...state.Filesystems.Ephemeral,
+                    [containerKey]: {
+                        ...currentFiles,
+                        [path]: content,
+                    },
+                },
+            },
         };
     }
     if (action.type === CreatePodType) {
@@ -1575,9 +1647,49 @@ export const reducer = (state: AppState, action: Action): AppState => {
     }
     if (action.type === DeletePVType) {
         const { name } = action.payload;
+        const { [name]: _, ...remainingPVFilesystems } = state.Filesystems.PVFilesystems;
         return {
             ...state,
             PersistentVolumes: state.PersistentVolumes.filter(pv => pv.metadata.name !== name),
+            Filesystems: {
+                ...state.Filesystems,
+                PVFilesystems: remainingPVFilesystems,
+            },
+        };
+    }
+    if (action.type === WritePVFileType) {
+        const { pvName, path, content } = action.payload;
+        const currentFiles = state.Filesystems.PVFilesystems[pvName] || {};
+        return {
+            ...state,
+            Filesystems: {
+                ...state.Filesystems,
+                PVFilesystems: {
+                    ...state.Filesystems.PVFilesystems,
+                    [pvName]: {
+                        ...currentFiles,
+                        [path]: content,
+                    },
+                },
+            },
+        };
+    }
+    if (action.type === WriteEmptyDirFileType) {
+        const { podName, namespace, volumeName, path, content } = action.payload;
+        const emptyDirKey = `${namespace}/${podName}/${volumeName}`;
+        const currentFiles = state.Filesystems.EmptyDir[emptyDirKey] || {};
+        return {
+            ...state,
+            Filesystems: {
+                ...state.Filesystems,
+                EmptyDir: {
+                    ...state.Filesystems.EmptyDir,
+                    [emptyDirKey]: {
+                        ...currentFiles,
+                        [path]: content,
+                    },
+                },
+            },
         };
     }
     if (action.type === CreatePVCType) {

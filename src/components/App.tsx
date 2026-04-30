@@ -87,6 +87,11 @@ function makeInitialState(): AppState {
       } satisfies StorageClass,
     ],
     Events: [],
+    Filesystems: {
+      Ephemeral: {},
+      PVFilesystems: {},
+      EmptyDir: {},
+    },
   };
 }
 

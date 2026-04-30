@@ -1,4 +1,6 @@
 import type { AppState } from "../../store/store";
+import { readPodFile } from "./pod-filesystem";
+import { resolveFieldRef } from "./pod-metadata";
 
 // ---------------------------------------------------------------------------
 // Simulated fetch — used by the Browser pane (returns structured data)
@@ -647,9 +649,9 @@ type VolumeFetchResult =
     | null;                                   // no applicable mount
 
 /**
- * Returns content from a configMap/secret volume mounted at the image's
- * document root, or null when no such mount applies (caller falls through
- * to the default generated response).
+ * Returns content from volumes mounted at the image's document root,
+ * or null when no such mount applies (caller falls through to the default generated response).
+ * Now uses the unified pod filesystem (supports ConfigMap, Secret, DownwardAPI, PVC, emptyDir, ephemeral).
  */
 function resolveVolumeFetch(
     pod: AppState["Pods"][number],
@@ -659,8 +661,6 @@ function resolveVolumeFetch(
 ): VolumeFetchResult {
     const docRoots = docRootsForImage(image);
     if (docRoots.length === 0) return null;
-
-    const ns = pod.metadata.namespace;
 
     for (const container of pod.spec.containers) {
         for (const vm of container.volumeMounts ?? []) {
@@ -673,50 +673,21 @@ function resolveVolumeFetch(
 
             if (!isDirMount && !parentDocRoot) continue;
 
-            const vol = pod.spec.volumes?.find(v => v.name === vm.name);
-            if (!vol) continue;
-
-            let data: Record<string, string> | undefined;
-            if (vol.configMap) {
-                data = state.ConfigMaps.find(
-                    cm => cm.metadata.name === vol.configMap!.name && cm.metadata.namespace === ns,
-                )?.data;
-            } else if (vol.secret) {
-                data = state.Secrets.find(
-                    s => s.metadata.name === vol.secret!.secretName && s.metadata.namespace === ns,
-                )?.data;
-            } else if (vol.downwardAPI) {
-                // Construct data from downwardAPI items
-                data = {};
-                for (const item of vol.downwardAPI.items ?? []) {
-                    if (item.fieldRef) {
-                        data[item.path] = resolveFieldRef(item.fieldRef.fieldPath, pod);
-                    } else if (item.resourceFieldRef) {
-                        // For now, we'll provide placeholder values for resource fields
-                        // In a real implementation, these would come from container resource limits/requests
-                        const resource = item.resourceFieldRef.resource;
-                        if (resource === "limits.cpu") {
-                            data[item.path] = container.resources?.limits?.cpu ?? "1";
-                        } else if (resource === "limits.memory") {
-                            data[item.path] = container.resources?.limits?.memory ?? "512Mi";
-                        } else if (resource === "requests.cpu") {
-                            data[item.path] = container.resources?.requests?.cpu ?? "100m";
-                        } else if (resource === "requests.memory") {
-                            data[item.path] = container.resources?.requests?.memory ?? "128Mi";
-                        } else {
-                            data[item.path] = `(${resource})`;
-                        }
-                    }
-                }
-            }
-            if (!data) continue; // not a configMap/secret/downwardAPI-backed volume
-
             if (isDirMount) {
+                // Directory mount - construct full path and use unified filesystem
                 const filename = requestPath === "/" || requestPath === ""
                     ? "index.html"
                     : requestPath.replace(/^\//, "");
-                if (!(filename in data)) return { notFound: true };
-                return { body: data[filename], contentType: contentTypeForFilename(filename) };
+                const fullPath = vm.mountPath.endsWith('/')
+                    ? `${vm.mountPath}${filename}`
+                    : `${vm.mountPath}/${filename}`;
+                
+                const fileData = readPodFile(pod, fullPath, state, container.name);
+                if (fileData) {
+                    return { body: fileData.content, contentType: contentTypeForFilename(filename) };
+                }
+                // File not found in this mount
+                return { notFound: true };
             } else {
                 // File mount: only serve when the request path matches this file.
                 const filename = vm.mountPath.slice(parentDocRoot!.length + 1);
@@ -724,8 +695,12 @@ function resolveVolumeFetch(
                     requestPath === "/" + filename ||
                     (requestPath === "/" && filename === "index.html");
                 if (!requestMatches) continue;
-                if (!(filename in data)) return { notFound: true };
-                return { body: data[filename], contentType: contentTypeForFilename(filename) };
+                
+                const fileData = readPodFile(pod, vm.mountPath, state, container.name);
+                if (fileData) {
+                    return { body: fileData.content, contentType: contentTypeForFilename(filename) };
+                }
+                return { notFound: true };
             }
         }
     }
@@ -765,25 +740,6 @@ function contentTypeForFilename(filename: string): string {
 // Resolve all env vars for the first container of a pod.
 // envFrom is expanded first (lower priority); env entries override.
 // ---------------------------------------------------------------------------
-function resolveFieldRef(fieldPath: string, pod: AppState["Pods"][number]): string {
-    switch (fieldPath) {
-        case "metadata.name":      return pod.metadata.name;
-        case "metadata.namespace": return pod.metadata.namespace;
-        case "metadata.uid":       return pod.metadata.uid;
-        case "status.podIP":       return pod.status.podIP ?? "";
-        case "status.hostIP":      return pod.status.hostIP ?? "";
-        case "spec.nodeName":      return pod.spec.nodeName ?? "";
-        case "spec.serviceAccountName": return pod.spec.serviceAccountName ?? "default";
-        default: {
-            const lm = fieldPath.match(/^metadata\.labels\['(.+)'\]$/);
-            if (lm) return pod.metadata.labels?.[lm[1]] ?? "";
-            const am = fieldPath.match(/^metadata\.annotations\['(.+)'\]$/);
-            if (am) return pod.metadata.annotations?.[am[1]] ?? "";
-            return `(${fieldPath})`;
-        }
-    }
-}
-
 function resolveEnv(pod: AppState["Pods"][number], state: AppState): Array<[string, string]> {
     const container = pod.spec.containers[0];
     if (!container) return [];
