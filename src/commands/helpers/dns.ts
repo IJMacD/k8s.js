@@ -4,13 +4,33 @@
  */
 import type { AppState } from "../../store/store";
 
-export interface DnsRecord {
+export interface DnsARecord {
     name: string;        // FQDN that was resolved
     addresses: string[]; // A record values
     type: "A";
 }
 
-export function lookupClusterDNS(host: string, state: AppState): DnsRecord[] {
+export interface DnsSRVRecord {
+    name: string;        // FQDN that was resolved
+    type: "SRV";
+    records: Array<{
+        priority: number;
+        weight: number;
+        port: number;
+        target: string;
+    }>;
+}
+
+export type DnsRecord = DnsARecord | DnsSRVRecord;
+
+export function lookupClusterDNS(host: string, state: AppState, recordType: "A" | "SRV" = "A"): DnsRecord[] {
+    if (recordType === "SRV") {
+        return lookupSRV(host, state);
+    }
+    return lookupA(host, state);
+}
+
+function lookupA(host: string, state: AppState): DnsARecord[] {
     const { Services, Pods, Endpoints, Nodes } = state;
 
     const normalise = (h: string) => h.replace(/\.$/, ""); // strip trailing dot
@@ -54,7 +74,7 @@ export function lookupClusterDNS(host: string, state: AppState): DnsRecord[] {
         /^(?<svc>[^.]+)\.(?<ns>[^.]+)$/,
     ];
 
-    const resolveSvc = (svcName: string, ns: string): DnsRecord[] | null => {
+    const resolveSvc = (svcName: string, ns: string): DnsARecord[] | null => {
         const svc = Services.find(s => s.metadata.name === svcName && s.metadata.namespace === ns);
         if (!svc) return null;
         const qualifiedName = fqdn(svcName, ns);
@@ -89,6 +109,82 @@ export function lookupClusterDNS(host: string, state: AppState): DnsRecord[] {
     if (node) {
         const ip = node.status.addresses.find(a => a.type === "InternalIP")?.address ?? host;
         return [{ name: host, addresses: [ip], type: "A" }];
+    }
+
+    return [];
+}
+
+function lookupSRV(host: string, state: AppState): DnsSRVRecord[] {
+    const { Services } = state;
+    
+    const normalise = (h: string) => h.replace(/\.$/, ""); // strip trailing dot
+    host = normalise(host);
+
+    // SRV records follow the pattern: _service._proto.name
+    // In Kubernetes, these are typically: _<port-name>._<protocol>.<service>.<namespace>.svc.cluster.local
+    const srvPatterns = [
+        /^_(?<portName>[^.]+)\._(?<proto>tcp|udp)\.(?<svc>[^.]+)\.(?<ns>[^.]+)\.svc\.cluster\.local$/,
+        /^_(?<portName>[^.]+)\._(?<proto>tcp|udp)\.(?<svc>[^.]+)\.(?<ns>[^.]+)\.svc\.cluster$/,
+        /^_(?<portName>[^.]+)\._(?<proto>tcp|udp)\.(?<svc>[^.]+)\.(?<ns>[^.]+)\.svc$/,
+        /^_(?<portName>[^.]+)\._(?<proto>tcp|udp)\.(?<svc>[^.]+)\.(?<ns>[^.]+)$/,
+        /^_(?<portName>[^.]+)\._(?<proto>tcp|udp)\.(?<svc>[^.]+)$/,
+    ];
+
+    for (const pattern of srvPatterns) {
+        const m = host.match(pattern);
+        if (m?.groups) {
+            const { portName, proto, svc: svcName, ns = "default" } = m.groups;
+            const svc = Services.find(s => s.metadata.name === svcName && s.metadata.namespace === ns);
+            
+            if (!svc) continue;
+
+            // Find the matching port
+            const port = svc.spec.ports.find(p => 
+                (p.name === portName || p.port.toString() === portName) && 
+                p.protocol.toLowerCase() === proto.toLowerCase()
+            );
+
+            if (!port) continue;
+
+            const fqdn = `${svcName}.${ns}.svc.cluster.local`;
+            const srvFqdn = `_${portName}._${proto}.${fqdn}`;
+
+            // For headless services, create SRV records for each endpoint
+            if (svc.spec.clusterIP === "None") {
+                const ep = state.Endpoints.find(e => e.metadata.name === svcName && e.metadata.namespace === ns);
+                const records: DnsSRVRecord["records"] = [];
+                
+                if (ep) {
+                    ep.subsets.forEach((subset, idx) => {
+                        subset.addresses.forEach((addr) => {
+                            // For headless services, SRV points to pod-specific DNS names
+                            const podName = addr.targetRef?.name || `pod-${idx}`;
+                            const target = `${podName}.${fqdn}`;
+                            records.push({
+                                priority: 0,
+                                weight: 100,
+                                port: port.port,
+                                target: target,
+                            });
+                        });
+                    });
+                }
+
+                return [{ name: srvFqdn, type: "SRV", records }];
+            } else {
+                // For regular services, point to the service FQDN
+                return [{
+                    name: srvFqdn,
+                    type: "SRV",
+                    records: [{
+                        priority: 0,
+                        weight: 100,
+                        port: port.port,
+                        target: fqdn,
+                    }],
+                }];
+            }
+        }
     }
 
     return [];

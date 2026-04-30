@@ -16,7 +16,7 @@ export async function* ping(args: string[], state: AppState): AsyncGenerator<str
         yield `ping: cannot resolve ${target}: Name or service not known`; return;
     }
 
-    const allAddresses = records.flatMap(r => r.addresses);
+    const allAddresses = records.flatMap(r => r.type === "A" ? r.addresses : []);
     if (allAddresses.length === 0) {
         yield `ping: connect to host ${target}: Connection refused`; return;
     }
