@@ -396,7 +396,7 @@ export type Action =
     | { type: typeof BindPVCType; payload: { pvcName: string; pvcNamespace: string; pvName: string } }
     | { type: typeof CreateStorageClassType; payload: StorageClass }
     | { type: typeof DeleteStorageClassType; payload: { name: string } }
-    | { type: typeof EmitEventType; payload: Omit<KubeEvent, "uid" | "firstTimestamp" | "lastTimestamp" | "count"> };
+    | { type: typeof EmitEventType; payload: Omit<KubeEvent, "metadata" | "firstTimestamp" | "lastTimestamp" | "count"> & { namespace: string } };
 
 export function emitEvent(
     involvedObject: KubeEvent["involvedObject"],
@@ -1802,9 +1802,15 @@ export const reducer = (state: AppState, action: Action): AppState => {
             );
             return { ...state, Events: updated };
         }
+        const uid = crypto.randomUUID();
+        const eventName = `${p.involvedObject.name}.${uid.slice(0, 8)}`;
         const newEvent: KubeEvent = {
-            uid: crypto.randomUUID(),
-            namespace: p.namespace,
+            metadata: {
+                uid,
+                name: eventName,
+                namespace: p.namespace,
+                creationTimestamp: now,
+            },
             involvedObject: p.involvedObject,
             reason: p.reason,
             message: p.message,
@@ -1812,6 +1818,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
             firstTimestamp: now,
             lastTimestamp: now,
             count: 1,
+            source: p.source,
         };
         const events = [...state.Events, newEvent];
         // Cap to MAX_EVENTS, dropping oldest first

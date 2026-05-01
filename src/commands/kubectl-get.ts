@@ -412,11 +412,11 @@ export async function* kubectlGet(
         }
         if (type === "events" || type === "event" || type === "ev") {
             const items = state.Events.filter(
-                e => allNs || e.namespace === namespace,
+                e => allNs || e.metadata.namespace === namespace,
             );
             const headers = [...nsHdr, "LAST SEEN", "TYPE", "REASON", "OBJECT", "MESSAGE"];
             const rows = items.map(e => [
-                ...nsCol(e.namespace),
+                ...nsCol(e.metadata.namespace),
                 ageStr(e.lastTimestamp),
                 e.type,
                 e.reason,
