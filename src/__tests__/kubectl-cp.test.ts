@@ -472,6 +472,57 @@ describe('kubectl cp - Error Handling', () => {
     });
 });
 
+describe('kubectl cp - Dynamic PVC Binding', () => {
+    it('should work with PVC bound by usePVCBinder controller', async () => {
+        const state = createTestState();
+
+        // Create unbound PVC (no volumeName set initially)
+        const pv = createTestPV('auto-pv', '1Gi');
+        const pvc = createTestPVC('auto-pvc', 'default');
+        // PVC initially has no volumeName - will be set by binding
+        expect(pvc.spec.volumeName).toBeUndefined();
+
+        state.PersistentVolumes.push(pv);
+        state.PersistentVolumeClaims.push(pvc);
+
+        const pod = createTestPod(
+            'app',
+            'default',
+            [{ name: 'app', volumeMounts: [{ name: 'data', mountPath: '/data' }] }],
+            [{ name: 'data', type: 'pvc', claimName: 'auto-pvc' }]
+        );
+        state.Pods.push(pod);
+
+        // Simulate binding by calling bindPVC action
+        const bindAction = {
+            type: 'BIND_PVC' as const,
+            payload: { pvcName: 'auto-pvc', pvcNamespace: 'default', pvName: 'auto-pv' }
+        };
+
+        // Import reducer to apply action
+        const { reducer } = await import('../store/store');
+        const boundState = reducer(state, bindAction);
+
+        // Verify binding set spec.volumeName
+        const boundPVC = boundState.PersistentVolumeClaims.find(
+            p => p.metadata.name === 'auto-pvc'
+        );
+        expect(boundPVC?.spec.volumeName).toBe('auto-pv');
+        expect(boundPVC?.status.phase).toBe('Bound');
+
+        // Now kubectl cp should work
+        writeFile('./test-data.txt', 'test-content');
+
+        const { output, finalState } = await execKubectlCp(
+            ['cp', './test-data.txt', 'app:/data/file.txt'],
+            boundState
+        );
+
+        expect(output[0]).toContain('persistent volume: auto-pv');
+        expect(finalState.Filesystems.PVFilesystems['auto-pv']['file.txt']).toBe('test-content');
+    });
+});
+
 describe('kubectl cp - Round-Trip', () => {
     it('should preserve content through local -> pod -> local round-trip', async () => {
         const state = createTestState();

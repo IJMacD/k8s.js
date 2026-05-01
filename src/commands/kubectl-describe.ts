@@ -790,7 +790,7 @@ export async function* kubectlDescribe(
             `Namespace:     ${pvc.metadata.namespace}`,
             `StorageClass:  ${pvc.spec.storageClassName ?? ""}`,
             `Status:        ${pvc.status.phase}`,
-            `Volume:        ${pvc.status.boundVolume ?? ""}`,
+            `Volume:        ${pvc.spec.volumeName ?? ""}`,
             `Labels:        ${Object.entries(pvc.metadata.labels ?? {}).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
             `Annotations:   ${Object.entries(pvc.metadata.annotations ?? {}).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
             `Finalizers:    []`,

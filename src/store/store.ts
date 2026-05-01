@@ -1720,8 +1720,8 @@ export const reducer = (state: AppState, action: Action): AppState => {
             c => c.metadata.name === name && c.metadata.namespace === namespace,
         );
         let pvs = state.PersistentVolumes;
-        if (pvc?.status.boundVolume) {
-            const pvName = pvc.status.boundVolume;
+        if (pvc?.spec.volumeName) {
+            const pvName = pvc.spec.volumeName;
             const pv = pvs.find(p => p.metadata.name === pvName);
             if (pv) {
                 if (pv.spec.persistentVolumeReclaimPolicy === "Delete") {
@@ -1763,11 +1763,14 @@ export const reducer = (state: AppState, action: Action): AppState => {
             PersistentVolumeClaims: state.PersistentVolumeClaims.map(c =>
                 !(c.metadata.name === pvcName && c.metadata.namespace === pvcNamespace) ? c : {
                     ...c,
+                    spec: {
+                        ...c.spec,
+                        volumeName: pvName, // Set spec.volumeName when binding
+                    },
                     status: {
                         phase: "Bound" as const,
                         capacity: pv.spec.capacity,
                         accessModes: pv.spec.accessModes,
-                        boundVolume: pvName,
                     },
                 }
             ),

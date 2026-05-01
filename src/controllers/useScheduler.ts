@@ -209,7 +209,7 @@ export function useScheduler(
             let blockReason: string | null = null;
             let affinityFiltered = selectorFiltered;
             for (const pvc of pvcRefs as NonNullable<typeof pvcRefs[number]>[]) {
-                const pvName = pvc.status.boundVolume;
+                const pvName = pvc.spec.volumeName;
                 const pv = pvName ? PersistentVolumes.find(p => p.metadata.name === pvName) : undefined;
                 const terms = pv?.spec.nodeAffinity?.required?.nodeSelectorTerms;
                 if (!terms || terms.length === 0) continue;
@@ -301,7 +301,7 @@ export function useScheduler(
                     const blockingPV = (() => {
                         let remaining = selectorFiltered;
                         for (const pvc of pvcRefs.filter(Boolean) as NonNullable<typeof pvcRefs[number]>[]) {
-                            const pvName = pvc.status.boundVolume;
+                            const pvName = pvc.spec.volumeName;
                             const pv = pvName ? PersistentVolumes.find(p => p.metadata.name === pvName) : undefined;
                             const terms = pv?.spec.nodeAffinity?.required?.nodeSelectorTerms;
                             if (!terms) continue;

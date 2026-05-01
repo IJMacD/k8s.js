@@ -27,5 +27,4 @@ export interface PVCStatus {
     phase: "Pending" | "Bound" | "Lost";
     capacity?: { storage: string };
     accessModes?: AccessMode[];
-    boundVolume?: string; // Name of the bound PV
 }

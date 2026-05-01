@@ -378,7 +378,7 @@ export async function* kubectlGet(
                 ...nsCol(pvc.metadata.namespace),
                 pvc.metadata.name,
                 pvc.status.phase,
-                pvc.status.boundVolume ?? "",
+                pvc.spec.volumeName ?? "",
                 pvc.status.capacity?.storage ?? "",
                 (pvc.status.accessModes ?? pvc.spec.accessModes).map(m => {
                     if (m === "ReadWriteOnce") return "RWO";

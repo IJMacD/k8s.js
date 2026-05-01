@@ -728,7 +728,7 @@ export function ResourceTabs({ Deployments, DaemonSets, StatefulSets, ReplicaSet
                     <td>{pvc.metadata.namespace}</td>
                     <td>{pvc.metadata.name}</td>
                     <td>{pvc.status.phase}</td>
-                    <td>{pvc.status.boundVolume ?? ''}</td>
+                    <td>{pvc.spec.volumeName ?? ''}</td>
                     <td>{pvc.status.capacity?.storage ?? ''}</td>
                     <td>{(pvc.status.accessModes ?? pvc.spec.accessModes).map(fmtMode).join(',')}</td>
                     <td>{pvc.spec.storageClassName ?? ''}</td>
