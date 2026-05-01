@@ -1,7 +1,51 @@
 import type { ActionDispatch } from "react";
 import { type Action, type AppState, writeEphemeralFile, writePVFile, writeEmptyDirFile } from "../store/store";
 import { readPodFile, listPodDirectory, resolvePVCMount, resolveEmptyDirMount, isReadOnlyMount } from "./helpers/pod-filesystem";
-import { readFile, writeFile } from "./helpers/filesystem";
+import { readFile, writeFile, listFiles } from "./helpers/filesystem";
+
+/**
+ * Extract filename from a path
+ */
+function getFilename(path: string): string {
+    const normalized = path.endsWith('/') ? path.slice(0, -1) : path;
+    const parts = normalized.split('/');
+    return parts[parts.length - 1] || '';
+}
+
+/**
+ * Check if a local path is a directory (has trailing slash or exists with multiple matches)
+ */
+function isLocalDirectory(path: string): boolean {
+    // Trailing slash indicates directory
+    if (path.endsWith('/')) {
+        return true;
+    }
+    
+    // Check if any files start with this path followed by /
+    // This indicates it's been used as a directory prefix
+    const files = listFiles();
+    const dirPrefix = path + '/';
+    return files.some(f => f.startsWith(dirPrefix));
+}
+
+/**
+ * Check if a pod path is a volume mount point (which is always a directory)
+ */
+function isPodMountPoint(pod: AppState["Pods"][number], path: string, containerName?: string): boolean {
+    const containers = containerName
+        ? pod.spec.containers.filter(c => c.name === containerName)
+        : pod.spec.containers;
+
+    for (const container of containers) {
+        for (const vm of container.volumeMounts ?? []) {
+            const mountPath = vm.mountPath.endsWith('/') ? vm.mountPath.slice(0, -1) : vm.mountPath;
+            if (path === mountPath) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
 
 /**
  * kubectl cp implementation
@@ -97,10 +141,18 @@ async function* copyFromPod(
         throw Error(`Error: file ${podPath} not found in pod ${podName}`);
     }
 
-    // Write to local filesystem
-    writeFile(localPath, fileData.content);
+    // Determine actual destination path
+    let destPath = localPath;
+    if (isLocalDirectory(localPath)) {
+        // Destination is a directory, append source filename
+        const filename = getFilename(podPath);
+        destPath = localPath.endsWith('/') ? `${localPath}${filename}` : `${localPath}/${filename}`;
+    }
 
-    yield `Copied ${podName}:${podPath} to ${localPath} (source: ${fileData.source})`;
+    // Write to local filesystem
+    writeFile(destPath, fileData.content);
+
+    yield `Copied ${podName}:${podPath} to ${destPath} (source: ${fileData.source})`;
 }
 
 /**
@@ -153,7 +205,16 @@ async function* copyToPod(
     }
 
     // Normalize the pod path (ensure leading slash)
-    const normalizedPath = podPath.startsWith('/') ? podPath : `/${podPath}`;
+    let normalizedPath = podPath.startsWith('/') ? podPath : `/${podPath}`;
+    
+    // Check if destination is a directory (trailing slash or mount point)
+    if (podPath.endsWith('/') || isPodMountPoint(pod, normalizedPath, targetContainer)) {
+        // Destination is a directory, append source filename
+        const filename = getFilename(localPath);
+        normalizedPath = normalizedPath.endsWith('/') 
+            ? `${normalizedPath}${filename}` 
+            : `${normalizedPath}/${filename}`;
+    }
 
     // Check if path is within a PVC mount
     const pvcMount = resolvePVCMount(pod, normalizedPath, state, targetContainer);

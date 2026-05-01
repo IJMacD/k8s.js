@@ -523,6 +523,139 @@ describe('kubectl cp - Dynamic PVC Binding', () => {
     });
 });
 
+describe('kubectl cp - Directory Destinations', () => {
+    it('should append filename when copying to local directory with trailing slash', async () => {
+        const state = createTestState();
+
+        const cm = createTestConfigMap('data', 'default', { 'myfile.txt': 'content' });
+        state.ConfigMaps.push(cm);
+
+        const pod = createTestPod(
+            'pod',
+            'default',
+            [{ name: 'app', volumeMounts: [{ name: 'data', mountPath: '/data' }] }],
+            [{ name: 'data', type: 'configMap', configMapName: 'data' }]
+        );
+        state.Pods.push(pod);
+
+        // Copy to directory with trailing slash
+        await execKubectlCp(['cp', 'pod:/data/myfile.txt', './downloads/'], state);
+
+        // Should create ./downloads/myfile.txt
+        const content = readFile('./downloads/myfile.txt');
+        expect(content).toBe('content');
+    });
+
+    it('should append filename when copying to existing local directory', async () => {
+        const state = createTestState();
+
+        const cm = createTestConfigMap('data', 'default', { 'test.txt': 'test-content' });
+        state.ConfigMaps.push(cm);
+
+        const pod = createTestPod(
+            'pod',
+            'default',
+            [{ name: 'app', volumeMounts: [{ name: 'data', mountPath: '/data' }] }],
+            [{ name: 'data', type: 'configMap', configMapName: 'data' }]
+        );
+        state.Pods.push(pod);
+
+        // Create a file to establish ./output as a directory
+        writeFile('./output/existing.txt', 'existing');
+
+        // Copy to existing directory
+        await execKubectlCp(['cp', 'pod:/data/test.txt', './output'], state);
+
+        // Should create ./output/test.txt
+        const content = readFile('./output/test.txt');
+        expect(content).toBe('test-content');
+    });
+
+    it('should append filename when copying to pod directory with trailing slash', async () => {
+        const state = createTestState();
+
+        const pv = createTestPV('pv', '1Gi');
+        const pvc = createTestPVC('pvc', 'default', 'pv');
+        state.PersistentVolumes.push(pv);
+        state.PersistentVolumeClaims.push(pvc);
+
+        const pod = createTestPod(
+            'pod',
+            'default',
+            [{ name: 'app', volumeMounts: [{ name: 'data', mountPath: '/data' }] }],
+            [{ name: 'data', type: 'pvc', claimName: 'pvc' }]
+        );
+        state.Pods.push(pod);
+
+        writeFile('./upload.txt', 'upload-content');
+
+        // Copy to directory with trailing slash
+        const { finalState } = await execKubectlCp(
+            ['cp', './upload.txt', 'pod:/data/'],
+            state
+        );
+
+        // Should create /data/upload.txt
+        expect(finalState.Filesystems.PVFilesystems['pv']['upload.txt']).toBe('upload-content');
+    });
+
+    it('should append filename when copying to mount point (directory)', async () => {
+        const state = createTestState();
+
+        const pv = createTestPV('pv', '1Gi');
+        const pvc = createTestPVC('pvc', 'default', 'pv');
+        state.PersistentVolumes.push(pv);
+        state.PersistentVolumeClaims.push(pvc);
+
+        const pod = createTestPod(
+            'webserver',
+            'default',
+            [{ name: 'nginx', volumeMounts: [{ name: 'html', mountPath: '/var/www/html' }] }],
+            [{ name: 'html', type: 'pvc', claimName: 'pvc' }]
+        );
+        state.Pods.push(pod);
+
+        writeFile('./index.html', '<html>Hello</html>');
+
+        // Copy to mount point (no trailing slash, but it's a mount point = directory)
+        const { finalState } = await execKubectlCp(
+            ['cp', './index.html', 'webserver:/var/www/html'],
+            state
+        );
+
+        // Should create /var/www/html/index.html, NOT overwrite /var/www/html
+        expect(finalState.Filesystems.PVFilesystems['pv']['index.html']).toBe('<html>Hello</html>');
+
+        // Verify it didn't create a weird "html" file
+        expect(finalState.Filesystems.PVFilesystems['pv']['html']).toBeUndefined();
+    });
+
+    it('should use exact path when no trailing slash on file destination', async () => {
+        const state = createTestState();
+
+        const cm = createTestConfigMap('data', 'default', { 'source.txt': 'content' });
+        state.ConfigMaps.push(cm);
+
+        const pod = createTestPod(
+            'pod',
+            'default',
+            [{ name: 'app', volumeMounts: [{ name: 'data', mountPath: '/data' }] }],
+            [{ name: 'data', type: 'configMap', configMapName: 'data' }]
+        );
+        state.Pods.push(pod);
+
+        // Copy to exact file path (no trailing slash)
+        await execKubectlCp(['cp', 'pod:/data/source.txt', './renamed.txt'], state);
+
+        // Should create exact filename
+        const content = readFile('./renamed.txt');
+        expect(content).toBe('content');
+
+        // Should NOT create ./renamed.txt/source.txt
+        expect(readFile('./renamed.txt/source.txt')).toBeUndefined();
+    });
+});
+
 describe('kubectl cp - Round-Trip', () => {
     it('should preserve content through local -> pod -> local round-trip', async () => {
         const state = createTestState();
