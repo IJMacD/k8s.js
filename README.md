@@ -312,6 +312,37 @@ edit test.yaml
 kubectl apply -f test.yaml
 ```
 
+### kubectl exec (limited)
+
+`kubectl exec` executes commands inside running pods, with support for a limited set of debugging commands.
+
+```sh
+# Execute a command in a pod
+kubectl exec nginx -- pwd
+
+# Use -c to target a specific container in a multi-container pod
+kubectl exec multi-container-pod -c sidecar -- ls /config
+
+# Supported commands: pwd, echo, whoami, ls, cat, env
+kubectl exec nginx -- ls /
+kubectl exec nginx -- cat /etc/config/app.conf
+kubectl exec nginx -- env
+```
+
+**Supported commands:**
+- `pwd` — print working directory (always `/`)
+- `echo` — print arguments
+- `whoami` — print current user (always `root`)
+- `ls [path]` — list files and directories; supports ConfigMaps, Secrets, PVCs, and ephemeral storage
+- `cat [file...]` — read file contents from ConfigMaps, Secrets, PVCs, and ephemeral storage
+- `env` — show environment variables (resolves `env`, `envFrom`, ConfigMaps, Secrets, and downward API field references)
+
+**Limitations:**
+- Interactive commands (e.g., `bash`, `sh`) are not supported
+- Commands that modify the filesystem are not supported (e.g., `rm`, `touch`, `mkdir`)
+- Only a small set of built-in commands are available
+- No piping, redirection, or shell features
+
 ### Querying all resources
 
 ```sh
