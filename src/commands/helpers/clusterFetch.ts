@@ -1,6 +1,6 @@
 import type { AppState } from "../../store/store";
 import { readPodFile } from "./pod-filesystem";
-import { resolveFieldRef } from "./pod-metadata";
+import { resolveEnv } from "./pod-env";
 
 // ---------------------------------------------------------------------------
 // Simulated fetch — used by the Browser pane (returns structured data)
@@ -120,7 +120,7 @@ export function clusterFetch(rawUrl: string, state: AppState): SimResponse | Sim
         }
     }
 
-    const envEntries = pod ? resolveEnv(pod, state) : [];
+    const envEntries = pod ? resolveEnv(pod, pod.spec.containers[0]?.name ?? "", state) : [];
     const envSection = envEntries.length > 0
         ? [
             `<h2 style="font-family:monospace;font-size:14px;margin:16px 0 6px">Environment</h2>`,
@@ -734,56 +734,6 @@ function contentTypeForFilename(filename: string): string {
     if (ext === ".json")                   return "application/json";
     return "text/plain";
 }
-
-
-// ---------------------------------------------------------------------------
-// Resolve all env vars for the first container of a pod.
-// envFrom is expanded first (lower priority); env entries override.
-// ---------------------------------------------------------------------------
-function resolveEnv(pod: AppState["Pods"][number], state: AppState): Array<[string, string]> {
-    const container = pod.spec.containers[0];
-    if (!container) return [];
-    const resolved: Record<string, string> = {};
-
-    for (const ef of container.envFrom ?? []) {
-        const prefix = ef.prefix ?? "";
-        if (ef.configMapRef) {
-            const cm = state.ConfigMaps.find(
-                c => c.metadata.name === ef.configMapRef!.name && c.metadata.namespace === pod.metadata.namespace,
-            );
-            if (cm) for (const [k, v] of Object.entries(cm.data)) resolved[prefix + k] = v;
-        }
-        if (ef.secretRef) {
-            const secret = state.Secrets.find(
-                s => s.metadata.name === ef.secretRef!.name && s.metadata.namespace === pod.metadata.namespace,
-            );
-            if (secret) for (const [k, v] of Object.entries(secret.data)) resolved[prefix + k] = v;
-        }
-    }
-
-    for (const e of container.env ?? []) {
-        if (e.value != null) {
-            resolved[e.name] = e.value;
-        } else if (e.valueFrom?.configMapKeyRef) {
-            const ref = e.valueFrom.configMapKeyRef;
-            const cm = state.ConfigMaps.find(
-                c => c.metadata.name === ref.name && c.metadata.namespace === pod.metadata.namespace,
-            );
-            resolved[e.name] = cm?.data[ref.key] ?? "";
-        } else if (e.valueFrom?.secretKeyRef) {
-            const ref = e.valueFrom.secretKeyRef;
-            const secret = state.Secrets.find(
-                s => s.metadata.name === ref.name && s.metadata.namespace === pod.metadata.namespace,
-            );
-            resolved[e.name] = secret?.data[ref.key] ?? "";
-        } else if (e.valueFrom?.fieldRef) {
-            resolved[e.name] = resolveFieldRef(e.valueFrom.fieldRef.fieldPath, pod);
-        }
-    }
-
-    return Object.entries(resolved);
-}
-
 
 // ---------------------------------------------------------------------------
 // Images that are considered to be serving HTTP traffic, with their

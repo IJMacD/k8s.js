@@ -18,6 +18,7 @@ import { kubectlLabel } from "./kubectl-label";
 import { kubectlAnnotate } from "./kubectl-annotate";
 import { kubectlSet } from "./kubectl-set";
 import { kubectlCp } from "./kubectl-cp";
+import { kubectlExec } from "./kubectl-exec";
 import type { EditorMode } from "../components/Editor";
 
 /**
@@ -109,6 +110,10 @@ export async function* kubectl(
     }
     if (args[0] === "cp") {
         yield* kubectlCp(args, namespace, state, dispatch);
+        return;
+    }
+    if (args[0] === "exec") {
+        yield* kubectlExec(args, namespace, state);
         return;
     }
     throw Error(`kubectl: Unknown subcommand ${args[0]}`);
