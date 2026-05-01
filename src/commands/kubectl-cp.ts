@@ -1,6 +1,6 @@
 import type { ActionDispatch } from "react";
 import { type Action, type AppState, writeEphemeralFile, writePVFile, writeEmptyDirFile } from "../store/store";
-import { readPodFile, listPodDirectory, resolvePVCMount, resolveEmptyDirMount } from "./helpers/pod-filesystem";
+import { readPodFile, listPodDirectory, resolvePVCMount, resolveEmptyDirMount, isReadOnlyMount } from "./helpers/pod-filesystem";
 import { readFile, writeFile } from "./helpers/filesystem";
 
 /**
@@ -191,6 +191,11 @@ async function* copyToPod(
             : "";
         yield `Copied ${localPath} to ${podName}:${podPath} (emptyDir volume: ${emptyDirMount.volumeName})${containerSuffix}`;
         return;
+    }
+
+    // Check if path is within a read-only volume (ConfigMap, Secret, DownwardAPI, or readOnly mount)
+    if (isReadOnlyMount(pod, normalizedPath, targetContainer)) {
+        throw Error(`Error: cannot copy to ${podPath}: volume mount is read-only`);
     }
 
     // Write to pod's ephemeral filesystem (container-specific)

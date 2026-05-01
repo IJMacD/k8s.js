@@ -7,7 +7,7 @@ import { resolveFieldRef } from "./pod-metadata";
 export interface PodFile {
     path: string;
     content: string;
-    source: "configMap" | "secret" | "downwardAPI" | "ephemeral";
+    source: "configMap" | "secret" | "downwardAPI" | "ephemeral" | "pv" | "emptyDir";
 }
 
 /**
@@ -64,13 +64,13 @@ export function listPodFiles(
                 if (pvc && pvc.spec.volumeName) {
                     // Get files from PV filesystem
                     data = state.Filesystems.PVFilesystems[pvc.spec.volumeName];
-                    source = "ephemeral"; // PV files are writable/ephemeral
+                    source = "pv"; // PV files are writable
                 }
             } else if (vol.emptyDir) {
                 // Get files from emptyDir filesystem
                 const emptyDirKey = `${ns}/${pod.metadata.name}/${vol.name}`;
                 data = state.Filesystems.EmptyDir[emptyDirKey];
-                source = "ephemeral"; // emptyDir files are writable/ephemeral
+                source = "emptyDir"; // emptyDir files are writable
             } else if (vol.downwardAPI) {
                 // Construct data from downwardAPI items
                 data = {};
@@ -202,8 +202,8 @@ export function resolvePVCMount(
                         p => p.metadata.name === vol.persistentVolumeClaim!.claimName && p.metadata.namespace === ns,
                     );
                     if (pvc && pvc.spec.volumeName) {
-                        // Calculate relative path within the PV
-                        const relativePath = filePath === mountPath ? '/' : filePath.slice(mountPath.length);
+                        // Calculate relative path within the PV (strip leading slash for consistency)
+                        const relativePath = filePath === mountPath ? '/' : filePath.slice(mountPath.length + 1);
                         return {
                             pvName: pvc.spec.volumeName,
                             relativePath,
@@ -241,8 +241,8 @@ export function resolveEmptyDirMount(
                 // Find the volume
                 const vol = pod.spec.volumes?.find(v => v.name === vm.name);
                 if (vol?.emptyDir) {
-                    // Calculate relative path within the emptyDir
-                    const relativePath = filePath === mountPath ? '/' : filePath.slice(mountPath.length);
+                    // Calculate relative path within the emptyDir (strip leading slash for consistency)
+                    const relativePath = filePath === mountPath ? '/' : filePath.slice(mountPath.length + 1);
                     return {
                         volumeName: vol.name,
                         relativePath,
@@ -254,6 +254,40 @@ export function resolveEmptyDirMount(
     }
 
     return null;
+}
+
+/**
+ * Checks if a path is within a read-only volume mount (ConfigMap, Secret, or readOnly flag).
+ * Returns true if the path is in a read-only mount.
+ */
+export function isReadOnlyMount(
+    pod: AppState["Pods"][number],
+    filePath: string,
+    containerName?: string,
+): boolean {
+    const containers = containerName
+        ? pod.spec.containers.filter(c => c.name === containerName)
+        : pod.spec.containers;
+
+    for (const container of containers) {
+        for (const vm of container.volumeMounts ?? []) {
+            const mountPath = vm.mountPath.endsWith('/') ? vm.mountPath.slice(0, -1) : vm.mountPath;
+            if (filePath === mountPath || filePath.startsWith(mountPath + '/')) {
+                // Check if mount itself is marked readOnly
+                if (vm.readOnly) {
+                    return true;
+                }
+
+                // Check if volume type is inherently read-only
+                const vol = pod.spec.volumes?.find(v => v.name === vm.name);
+                if (vol?.configMap || vol?.secret || vol?.downwardAPI) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
 }
 
 /**
