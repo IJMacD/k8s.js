@@ -54,9 +54,55 @@ function podTemplateLines(template: PodTemplate): string[] {
                 `    Port:   <none>`,
                 ...fmtEnvFromLines(c.envFrom),
                 ...fmtEnvLines(c.env),
+                ...(c.volumeMounts?.length
+                    ? [`    Mounts:`, ...c.volumeMounts.map(vm => `      ${vm.mountPath} from ${vm.name} (${vm.readOnly ? "ro" : "rw"})`)]
+                    : [`    Mounts:         <none>`]
+                ),
             ]),
         ]
         : [];
+    
+    const volumeLines = template.spec.volumes?.length
+        ? [
+            `  Volumes:`,
+            ...template.spec.volumes.flatMap(v => {
+                const lines: string[] = [`   ${v.name}:`];
+                if (v.persistentVolumeClaim) {
+                    lines.push(`    Type:    PersistentVolumeClaim (a reference to a PersistentVolumeClaim in the same namespace)`);
+                    lines.push(`    ClaimName:  ${v.persistentVolumeClaim.claimName}`);
+                    lines.push(`    ReadOnly:   ${v.persistentVolumeClaim.readOnly ?? false}`);
+                } else if (v.configMap) {
+                    lines.push(`    Type:       ConfigMap (a volume populated by a ConfigMap)`);
+                    lines.push(`    Name:       ${v.configMap.name}`);
+                } else if (v.secret) {
+                    lines.push(`    Type:       Secret (a volume populated by a Secret)`);
+                    lines.push(`    SecretName: ${v.secret.secretName}`);
+                } else if (v.emptyDir !== undefined) {
+                    lines.push(`    Type:    EmptyDir (a temporary directory that shares a pod's lifetime)`);
+                    lines.push(`    Medium:  ${v.emptyDir.medium ?? ""}`);
+                } else if (v.hostPath) {
+                    lines.push(`    Type:  HostPath (bare host directory volume)`);
+                    lines.push(`    Path:  ${v.hostPath.path}`);
+                } else if (v.downwardAPI) {
+                    lines.push(`    Type:  DownwardAPI (a volume populated by downward API information)`);
+                    if (v.downwardAPI.items?.length) {
+                        lines.push(`    Items:`);
+                        for (const item of v.downwardAPI.items) {
+                            lines.push(`      ${item.path} ->`);
+                            if (item.fieldRef) {
+                                lines.push(`        fieldRef: ${item.fieldRef.fieldPath}`);
+                            }
+                            if (item.resourceFieldRef) {
+                                lines.push(`        resourceFieldRef: ${item.resourceFieldRef.resource}`);
+                            }
+                        }
+                    }
+                }
+                return lines;
+            }),
+        ]
+        : [];
+    
     return [
         `Pod Template:`,
         `  Labels:  ${Object.entries(template.metadata.labels ?? {}).map(([k, v]) => `${k}=${v}`).join(", ") || "<none>"}`,
@@ -68,7 +114,12 @@ function podTemplateLines(template: PodTemplate): string[] {
             `    Port:        ${c.ports?.length ? c.ports.map(fmtPort).join(", ") : "<none>"}`,
             ...fmtEnvFromLines(c.envFrom),
             ...fmtEnvLines(c.env),
+            ...(c.volumeMounts?.length
+                ? [`    Mounts:`, ...c.volumeMounts.map(vm => `      ${vm.mountPath} from ${vm.name} (${vm.readOnly ? "ro" : "rw"})`)]
+                : [`    Mounts:         <none>`]
+            ),
         ]),
+        ...volumeLines,
     ];
 }
 
@@ -596,6 +647,20 @@ export async function* kubectlDescribe(
                     } else if (v.hostPath) {
                         lines.push(`    Type:  HostPath (bare host directory volume)`);
                         lines.push(`    Path:  ${v.hostPath.path}`);
+                    } else if (v.downwardAPI) {
+                        lines.push(`    Type:  DownwardAPI (a volume populated by downward API information)`);
+                        if (v.downwardAPI.items?.length) {
+                            lines.push(`    Items:`);
+                            for (const item of v.downwardAPI.items) {
+                                lines.push(`      ${item.path} ->`);
+                                if (item.fieldRef) {
+                                    lines.push(`        fieldRef: ${item.fieldRef.fieldPath}`);
+                                }
+                                if (item.resourceFieldRef) {
+                                    lines.push(`        resourceFieldRef: ${item.resourceFieldRef.resource}`);
+                                }
+                            }
+                        }
                     }
                     return lines;
                   })
