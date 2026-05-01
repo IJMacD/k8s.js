@@ -168,9 +168,7 @@ export function Browser({ state, onDismiss, style }: { state: AppState; onDismis
                                 }
                                 navigate(target);
                             }}
-                            // All user-controlled values (path, hostname) are HTML-escaped in simFetch
-                            // before being placed in the body string.
-                            dangerouslySetInnerHTML={{ __html: (current.result as SimResponse).body }}
+                            dangerouslySetInnerHTML={{ __html: isTextResponse ? escapeHtml((current.result as SimResponse).body) : sanitize((current.result as SimResponse).body) }}
                         />
                     </div>
                 </>
@@ -178,6 +176,29 @@ export function Browser({ state, onDismiss, style }: { state: AppState; onDismis
         </div>
     );
 }
+
+// Escape HTML special chars to prevent breaking the layout when rendering non-HTML responses with dangerouslySetInnerHTML.
+function escapeHtml(input: string): string {
+    return input
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+// Simple sanitizer to strip out event handlers from HTML responses, since we're using dangerouslySetInnerHTML.
+function sanitize(input: string): string {
+    const doc = new DOMParser().parseFromString(input, 'text/html');
+    for (const elm of doc.querySelectorAll('*')) {
+        for (const attrib of elm.attributes) {
+            if (attrib.name.startsWith('on')) {
+                elm.removeAttribute(attrib.name);
+            }
+        }
+    }
+    return doc.body.innerHTML;
+};
 
 function navBtnStyle(disabled: boolean): React.CSSProperties {
     return {
