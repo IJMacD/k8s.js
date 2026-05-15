@@ -7,6 +7,7 @@ import { patchResource } from "../store/store";
  * Simulates the Kubernetes cloud-controller-manager's LoadBalancer reconciler.
  * Watches Services; for each LoadBalancer-type service without a populated
  * loadBalancer.ingress, assigns a unique 203.0.113.x IP (RFC 5737 TEST-NET-3).
+ * Services using a non-default load balancer class are ignored.
  */
 export function useServiceController(
     state: AppState,
@@ -39,6 +40,7 @@ export function useServiceController(
         for (const svc of Services) {
             if (svc.spec.type !== "LoadBalancer") continue;
             if (svc.spec.clusterIP === "None") continue;
+            if (svc.spec.loadBalancerClass) continue;
             const hasIngress = (svc.status.loadBalancer?.ingress ?? []).some(i => i.ip || i.hostname);
             if (hasIngress) continue;
 

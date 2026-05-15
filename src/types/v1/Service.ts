@@ -20,6 +20,7 @@ export interface ServiceSpec {
     selector: Record<string, string>;
     ports: ServicePort[];
     clusterIP: string;
+    loadBalancerClass?: string;
 }
 
 export interface ServicePort {
