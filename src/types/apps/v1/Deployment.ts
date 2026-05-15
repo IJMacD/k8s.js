@@ -1,4 +1,4 @@
-import type { PodTemplateSpec } from "../../v1/Pod";
+import type { PodTemplate } from "../../v1/Pod";
 
 export interface Deployment {
     metadata: DeploymentMetadata;
@@ -26,7 +26,7 @@ export interface DeploymentStatus {
 export interface DeploymentSpec {
     replicas: number; // Desired number of replicas
     selector: LabelSelector; // Label selector to identify the pods managed by this deployment
-    template: PodTemplateSpec; // Template for the pods to be created
+    template: PodTemplate; // Template for the pods to be created
     strategy: DeploymentStrategy; // Strategy for updating the deployment
     revisionHistoryLimit?: number; // Optional limit on the number of old ReplicaSets to retain
     minReadySeconds?: number; // Minimum seconds a newly created pod must be ready before it is considered available

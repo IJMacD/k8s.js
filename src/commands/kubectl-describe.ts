@@ -1,12 +1,5 @@
 import type { AppState } from "../store/store";
-
-type PodTemplate = {
-    metadata: { labels?: Record<string, string> };
-    spec: {
-        containers: import("../types/v1/Pod").Container[];
-        initContainers?: import("../types/v1/Pod").Container[];
-    };
-};
+import type { PodTemplate } from "../types/v1/Pod";
 
 function fmtEnvFromLines(envFrom: import("../types/v1/Pod").EnvFromSource[] | undefined): string[] {
     if (!envFrom?.length) return [];

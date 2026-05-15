@@ -1,4 +1,4 @@
-import type { PodTemplateSpec } from "../../v1/Pod";
+import type { PodTemplate } from "../../v1/Pod";
 
 export interface DaemonSet {
     metadata: DaemonSetMetadata;
@@ -18,7 +18,7 @@ export interface DaemonSetMetadata {
 
 export interface DaemonSetSpec {
     selector: LabelSelector;
-    template: PodTemplateSpec;
+    template: PodTemplate;
     updateStrategy: DaemonSetUpdateStrategy;
 }
 

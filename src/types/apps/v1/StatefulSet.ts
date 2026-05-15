@@ -1,4 +1,4 @@
-import type { PodTemplateSpec } from "../../v1/Pod";
+import type { PodTemplate } from "../../v1/Pod";
 import type { AccessMode } from "../../v1/PersistentVolume";
 
 export interface VolumeClaimTemplate {
@@ -34,7 +34,7 @@ export interface StatefulSetMetadata {
 export interface StatefulSetSpec {
     replicas: number;
     selector: { matchLabels: Record<string, string> };
-    template: PodTemplateSpec;
+    template: PodTemplate;
     serviceName: string;
     podManagementPolicy?: "OrderedReady" | "Parallel";
     updateStrategy?: { type: "RollingUpdate" | "OnDelete" };

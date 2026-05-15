@@ -1,5 +1,5 @@
-import type { Deployment } from "../types/apps/v1/Deployment";
-import type { Pod, PodTemplateSpec } from "../types/v1/Pod";
+import type { Deployment, DeploymentStrategy } from "../types/apps/v1/Deployment";
+import type { Pod, PodSpec, PodStatus, PodTemplate } from "../types/v1/Pod";
 import type { ReplicaSet } from "../types/apps/v1/ReplicaSet";
 import type { DaemonSet } from "../types/apps/v1/DaemonSet";
 import type { StatefulSet } from "../types/apps/v1/StatefulSet";
@@ -148,8 +148,8 @@ export interface CreateDeploymentAction {
         name: string;
         namespace: string;
         replicas: number;
-        template: import("../types/v1/Pod").PodTemplateSpec;
-        strategy?: import("../types/apps/v1/Deployment").DeploymentStrategy;
+        template: PodTemplate;
+        strategy?: DeploymentStrategy;
         revisionHistoryLimit?: number;
         minReadySeconds?: number;
     };
@@ -162,7 +162,7 @@ export interface CreatePodAction {
         namespace: string;
         template: {
             metadata?: { labels?: Record<string, string>; annotations?: Record<string, string> };
-            spec: import("../types/v1/Pod").PodSpec;
+            spec: PodSpec;
         };
         creationTimestamp: string;
         ownerReferences?: OwnerReference[];
@@ -171,7 +171,7 @@ export interface CreatePodAction {
 
 export interface CreateDaemonSetAction {
     type: typeof CreateDaemonSetType;
-    payload: { name: string; namespace: string; template: import("../types/v1/Pod").PodTemplateSpec };
+    payload: { name: string; namespace: string; template: PodTemplate };
 }
 
 export interface CreateStatefulSetAction {
@@ -181,7 +181,7 @@ export interface CreateStatefulSetAction {
         namespace: string;
         replicas: number;
         serviceName: string;
-        template: import("../types/v1/Pod").PodTemplateSpec;
+        template: PodTemplate;
         volumeClaimTemplates?: import("../types/apps/v1/StatefulSet").VolumeClaimTemplate[];
     };
 }
@@ -212,7 +212,7 @@ export interface CreateJobAction {
         completions: number;
         parallelism: number;
         backoffLimit: number;
-        template: import("../types/v1/Pod").PodTemplateSpec;
+        template: PodTemplate;
         ownerReferences?: OwnerReference[];
         creationTimestamp: string;
     };
@@ -238,7 +238,7 @@ export interface CreateCronJobAction {
         backoffLimit: number;
         successfulJobsHistoryLimit: number;
         failedJobsHistoryLimit: number;
-        template: import("../types/v1/Pod").PodTemplateSpec;
+        template: PodTemplate;
         creationTimestamp: string;
     };
 }
@@ -383,7 +383,7 @@ export type Action =
     | { type: typeof ScaleStatefulSetType; payload: { name: string; namespace: string; replicas: number } }
     | { type: typeof DeleteStatefulSetType; payload: { name: string; namespace: string } }
     | { type: typeof PatchResourceType; payload: { kind: string; name: string; namespace: string; patch: Record<string, unknown> } }
-    | { type: typeof RollbackDeploymentType; payload: { name: string; namespace: string; template: import("../types/v1/Pod").PodTemplateSpec } }
+    | { type: typeof RollbackDeploymentType; payload: { name: string; namespace: string; template: PodTemplate } }
     | { type: typeof ResetStateType; payload: AppState }
     | CreateConfigMapAction
     | { type: typeof DeleteConfigMapType; payload: { name: string; namespace: string } }
@@ -428,7 +428,7 @@ export function deleteCronJob(name: string, namespace = "default") {
 
 export function createDaemonSet(
     name: string,
-    spec: { template: import("../types/v1/Pod").PodTemplateSpec },
+    spec: { template: PodTemplate },
     namespace = "default",
 ): CreateDaemonSetAction {
     return { type: CreateDaemonSetType, payload: { name, namespace, template: spec.template } };
@@ -443,7 +443,7 @@ export function createStatefulSet(
     spec: {
         replicas?: number;
         serviceName?: string;
-        template: import("../types/v1/Pod").PodTemplateSpec;
+        template: PodTemplate;
         volumeClaimTemplates?: import("../types/apps/v1/StatefulSet").VolumeClaimTemplate[];
     },
     namespace = "default",
@@ -476,7 +476,7 @@ export function patchResource(
 
 export function rollbackDeployment(
     name: string,
-    template: import("../types/v1/Pod").PodTemplateSpec,
+    template: PodTemplate,
     namespace = "default",
 ) {
     return { type: RollbackDeploymentType as typeof RollbackDeploymentType, payload: { name, namespace, template } };
@@ -643,7 +643,7 @@ export function updateDaemonSetStatus(
 
 export function createJob(
     name: string,
-    spec: { completions?: number; parallelism?: number; backoffLimit?: number; template: import("../types/v1/Pod").PodTemplateSpec },
+    spec: { completions?: number; parallelism?: number; backoffLimit?: number; template: PodTemplate },
     namespace = "default",
     ownerRef?: { kind: string; apiVersion: string; name: string; uid: string },
 ): CreateJobAction {
@@ -674,7 +674,7 @@ export function updateJobStatus(
 
 export function createCronJob(
     name: string,
-    spec: { schedule: string; completions?: number; parallelism?: number; backoffLimit?: number; successfulJobsHistoryLimit?: number; failedJobsHistoryLimit?: number; template: import("../types/v1/Pod").PodTemplateSpec },
+    spec: { schedule: string; completions?: number; parallelism?: number; backoffLimit?: number; successfulJobsHistoryLimit?: number; failedJobsHistoryLimit?: number; template: PodTemplate },
     namespace = "default",
 ): CreateCronJobAction {
     return {
@@ -733,14 +733,14 @@ export interface UpdatePodStatusAction {
     payload: {
         name: string;
         namespace: string;
-        patch: Partial<import("../types/v1/Pod").PodStatus>;
+        patch: Partial<PodStatus>;
     };
 }
 
 export function updatePodStatus(
     name: string,
     namespace: string,
-    patch: Partial<import("../types/v1/Pod").PodStatus>,
+    patch: Partial<PodStatus>,
 ): UpdatePodStatusAction {
     return { type: UpdatePodStatusType, payload: { name, namespace, patch } };
 }
@@ -789,7 +789,7 @@ export interface CreateReplicaSetAction {
         ownerRef: { name: string; uid: string };
         replicas: number;
         selector: { matchLabels: Record<string, string> };
-        template: import("../types/v1/Pod").PodTemplateSpec;
+        template: PodTemplate;
     };
 }
 
@@ -832,7 +832,7 @@ export function createDeployment(
     name: string,
     spec: {
         replicas?: number;
-        template: import("../types/v1/Pod").PodTemplateSpec;
+        template: PodTemplate;
         strategy?: import("../types/apps/v1/Deployment").DeploymentStrategy;
         revisionHistoryLimit?: number;
         minReadySeconds?: number;
@@ -857,7 +857,7 @@ export function createPod(
     name: string,
     template: {
         metadata?: { labels?: Record<string, string>; annotations?: Record<string, string> };
-        spec: import("../types/v1/Pod").PodSpec;
+        spec: PodSpec;
     },
     namespace = "default",
     ownerRef?: { kind: string; apiVersion: string; name: string; uid: string },
@@ -881,7 +881,7 @@ export function createPod(
  * (`labels`, `annotations`, `nodeSelector`) with empty objects so that
  * `kubectl patch --type merge` can target them even before any value is set.
  */
-function admitPodTemplateSpec(template: PodTemplateSpec): PodTemplateSpec {
+function admitPodTemplateSpec(template: PodTemplate): PodTemplate {
     return {
         metadata: {
             ...template.metadata,
@@ -1647,6 +1647,7 @@ export const reducer = (state: AppState, action: Action): AppState => {
     }
     if (action.type === DeletePVType) {
         const { name } = action.payload;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { [name]: _, ...remainingPVFilesystems } = state.Filesystems.PVFilesystems;
         return {
             ...state,

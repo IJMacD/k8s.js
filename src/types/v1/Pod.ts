@@ -4,7 +4,7 @@ export interface Pod {
     spec: PodSpec;
 }
 
-export interface PodTemplateSpec {
+export interface PodTemplate {
     metadata: PodTemplateMetadata;
     spec: PodSpec;
 }

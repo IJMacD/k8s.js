@@ -1,7 +1,8 @@
 import { useEffect } from "react";
+import { createPod, deletePod, updateDaemonSetStatus } from "../store/store";
 import type { ActionDispatch } from "react";
 import type { AppState, Action } from "../store/store";
-import { createPod, deletePod, updateDaemonSetStatus } from "../store/store";
+import type { PodTemplate } from "../types/v1/Pod";
 
 /** Simulated reconciliation delay in milliseconds */
 const RECONCILE_DELAY_MS = 2_000;
@@ -9,7 +10,7 @@ const RECONCILE_DELAY_MS = 2_000;
 /**
  * Computes a stable hash of a pod template spec for change detection.
  */
-function podTemplateHash(template: import("../types/v1/Pod").PodTemplateSpec): string {
+function podTemplateHash(template: PodTemplate): string {
     const sortedReplacer = (_key: string, value: unknown) =>
         value !== null && typeof value === "object" && !Array.isArray(value)
             ? Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)))

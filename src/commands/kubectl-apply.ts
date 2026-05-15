@@ -1,5 +1,5 @@
 import type { ActionDispatch } from "react";
-import type { Container, Probe, PodTemplateSpec, Volume } from "../types/v1/Pod";
+import type { Container, Probe, PodTemplate, Volume } from "../types/v1/Pod";
 import {
     createConfigMap,
     createCronJob,
@@ -76,8 +76,8 @@ function parseContainers(podSpec: unknown): Container[] | undefined {
     return parseContainerArray((podSpec as Record<string, unknown> | undefined)?.containers);
 }
 
-/** Build a PodTemplateSpec from a raw YAML template object */
-function parseTemplate(rawTemplate: unknown, defaultName: string, defaultNamespace: string): PodTemplateSpec {
+/** Build a PodTemplate from a raw YAML template object */
+function parseTemplate(rawTemplate: unknown, defaultName: string, defaultNamespace: string): PodTemplate {
     const tmpl = rawTemplate as Record<string, unknown> | undefined;
     const rawMeta = tmpl?.metadata as Record<string, unknown> | undefined;
     const labels = (rawMeta?.labels ?? {}) as Record<string, string>;

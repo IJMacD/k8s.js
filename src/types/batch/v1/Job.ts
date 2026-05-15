@@ -1,4 +1,4 @@
-import type { PodTemplateSpec } from "../../v1/Pod";
+import type { PodTemplate } from "../../v1/Pod";
 import type { OwnerReference } from "../../v1/ObjectMeta";
 
 // ---------------------------------------------------------------------------
@@ -25,7 +25,7 @@ export interface JobSpec {
     completions: number;
     parallelism: number;
     backoffLimit: number;
-    template: PodTemplateSpec;
+    template: PodTemplate;
 }
 
 export interface JobStatus {
@@ -75,7 +75,7 @@ export interface CronJobSpec {
             completions: number;
             parallelism: number;
             backoffLimit: number;
-            template: PodTemplateSpec;
+            template: PodTemplate;
         };
     };
 }

@@ -3,6 +3,7 @@ import type { ActionDispatch } from "react";
 import type { AppState, Action } from "../store/store";
 import { createReplicaSet, deleteReplicaSet, scaleReplicaSet, updateDeploymentStatus } from "../store/store";
 import type { DeploymentStrategy } from "../types/apps/v1/Deployment";
+import type { PodTemplate } from "../types/v1/Pod";
 
 /**
  * Computes a stable 7-char hex hash of a pod template's containers and
@@ -11,7 +12,7 @@ import type { DeploymentStrategy } from "../types/apps/v1/Deployment";
  * and the `kubectl.kubernetes.io/restartedAt` annotation so that `rollout
  * restart` produces a new ReplicaSet (matching real Kubernetes behaviour).
  */
-function podTemplateHash(template: import("../types/v1/Pod").PodTemplateSpec): string {
+function podTemplateHash(template: PodTemplate): string {
     const sortedReplacer = (_key: string, value: unknown) =>
         value !== null && typeof value === "object" && !Array.isArray(value)
             ? Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)))

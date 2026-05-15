@@ -1,4 +1,4 @@
-import type { PodTemplateSpec } from "../../v1/Pod";
+import type { PodTemplate } from "../../v1/Pod";
 import type { OwnerReference } from "../../v1/ObjectMeta";
 
 export interface ReplicaSet {
@@ -28,7 +28,7 @@ export interface ReplicaSetStatus {
 export interface ReplicaSetSpec {
     replicas: number; // Desired number of replicas
     selector: LabelSelector; // Label selector to identify the pods managed by this replicaset
-    template: PodTemplateSpec; // Template for the pods to be created
+    template: PodTemplate; // Template for the pods to be created
 }
 
 export interface LabelSelector {
