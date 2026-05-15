@@ -105,11 +105,13 @@ async function* exec(
         if (!args[0]) {
             yield "cat: missing filename";
         } else {
-            const content = readFile(args[0]);
-            if (content === undefined) {
-                yield `cat: ${args[0]}: No such file`;
-            } else {
-                yield content;
+            for (const filename of args) {
+                const content = readFile(filename);
+                if (content === undefined) {
+                    yield `cat: ${filename}: No such file`;
+                } else {
+                    yield content;
+                }
             }
         }
     } else if (command === "rm") {
