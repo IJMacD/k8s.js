@@ -85,7 +85,7 @@ async function* exec(
     if (command === "") {
         return;
     } else if (command === "help") {
-        yield "Available commands: help, echo [message], date";
+        yield "Available commands: help, echo [message], date, ping, ls, cat [file], rm [file], cp [src] [dest], mv [src] [dest], curl, nslookup, edit [file], kubectl, graph";
     } else if (command === "echo") {
         yield args.join(" ");
     } else if (command === "date") {
