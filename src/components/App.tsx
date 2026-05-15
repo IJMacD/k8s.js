@@ -26,6 +26,7 @@ import { usePVCBinder } from '../controllers/usePVCBinder';
 import { useLocalPathProvisioner } from '../controllers/useLocalPathProvisioner';
 import { useSavedState } from '../hooks/useSavedState';
 import { useStorageClassController } from '../controllers/useStorageClassController';
+import { loadAll } from 'js-yaml';
 const STORAGE_KEY = 'k8s-apiserver';
 
 function makeInitialState(): AppState {
@@ -108,6 +109,9 @@ function App() {
   const [editorSession, setEditorSession] = useState<{ id: string; yaml: string; namespace: string; mode: EditorMode; filename?: string } | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showAddNode, setShowAddNode] = useState(false);
+  const [showApplyYamlDialog, setShowApplyYamlDialog] = useState(false);
+  const [applyYamlContent, setApplyYamlContent] = useState('');
+  const [applyYamlValidationError, setApplyYamlValidationError] = useState<string | null>(null);
   const [nodeCpu, setNodeCpu] = useState('4');
   const [nodeMemory, setNodeMemory] = useState('8Gi');
 
@@ -140,19 +144,68 @@ function App() {
   storeRef.current = store;
 
   const consoleRef = useRef<ConsoleHandle>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const applyYamlFileInputRef = useRef<HTMLInputElement>(null);
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleApplyYamlFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     file.text().then(content => {
-      writeFile(file.name, content);
-      setBottomTab('terminal');
-      consoleRef.current?.submitCommand(`kubectl apply -f ${file.name}`);
-      // Reset so the same file can be re-applied
+      setApplyYamlContent(content);
+      setApplyYamlValidationError(null);
       e.target.value = '';
     });
   }
+
+  function handleApplyYamlDialogOpen() {
+    setApplyYamlContent('');
+    setApplyYamlValidationError(null);
+    setShowApplyYamlDialog(true);
+  }
+
+  function handleApplyYamlDialogClose() {
+    setShowApplyYamlDialog(false);
+    setApplyYamlValidationError(null);
+  }
+
+  function validateYamlContent(content: string): string | null {
+    try {
+      const docs = loadAll(content);
+      const hasObjectDoc = docs.some(doc => doc !== null && typeof doc === 'object');
+      if (!hasObjectDoc) return 'No YAML documents found.';
+      return null;
+    } catch (err) {
+      return err instanceof Error ? err.message : 'Invalid YAML';
+    }
+  }
+
+  function handleApplyYamlFromDialog() {
+    const content = applyYamlContent.trim();
+    if (!content) return;
+    const validationError = validateYamlContent(content);
+    if (validationError) {
+      setApplyYamlValidationError(validationError);
+      return;
+    }
+    setApplyYamlValidationError(null);
+    writeFile('_apply.yaml', content);
+    setBottomTab('terminal');
+    consoleRef.current?.submitCommand('kubectl apply -f _apply.yaml');
+    setShowApplyYamlDialog(false);
+  }
+
+  useEffect(() => {
+    if (!showApplyYamlDialog) return;
+    function handleEscKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        handleApplyYamlDialogClose();
+      }
+    }
+    window.addEventListener('keydown', handleEscKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleEscKeyDown);
+    };
+  }, [showApplyYamlDialog]);
 
   const openEditor = useCallback((yaml: string, ns: string, mode: EditorMode = 'kubectl-edit', filename?: string) => {
     setEditorSession({ id: crypto.randomUUID(), yaml, namespace: ns, mode, filename });
@@ -199,14 +252,14 @@ function App() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '0 16px', flexShrink: 0 }}>
           <h1 style={{ margin: '16px 0' }}>k8s.js</h1>
           <input
-            ref={fileInputRef}
+            ref={applyYamlFileInputRef}
             type="file"
             accept=".yaml,.yml"
             style={{ display: 'none' }}
-            onChange={handleFileChange}
+            onChange={handleApplyYamlFileChange}
           />
           <button
-            onClick={() => fileInputRef.current?.click()}
+            onClick={handleApplyYamlDialogOpen}
             title="Apply a YAML manifest"
             style={{ background: '#3a3a3a', border: '1px solid #555', borderRadius: '4px', color: '#d4d4d4', cursor: 'pointer', fontFamily: 'monospace', fontSize: '12px', padding: '4px 12px' }}
           >
@@ -403,6 +456,79 @@ function App() {
               >
                 Reset
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showApplyYamlDialog && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}
+          onClick={e => { if (e.target === e.currentTarget) handleApplyYamlDialogClose(); }}
+        >
+          <div style={{ background: '#252526', border: '1px solid #555', borderRadius: '6px', padding: '20px', width: 'min(900px, 92vw)' }}>
+            <p style={{ color: '#e0e0e0', margin: '0 0 12px', fontWeight: 600 }}>Apply YAML manifest</p>
+            <textarea
+              value={applyYamlContent}
+              onChange={e => {
+                setApplyYamlContent(e.target.value);
+                if (applyYamlValidationError) setApplyYamlValidationError(null);
+              }}
+              spellCheck={false}
+              placeholder="Paste YAML here..."
+              style={{
+                width: '100%',
+                minHeight: '360px',
+                maxHeight: '60vh',
+                resize: 'vertical',
+                boxSizing: 'border-box',
+                background: '#1e1e1e',
+                border: '1px solid #555',
+                borderRadius: '4px',
+                color: '#d4d4d4',
+                fontFamily: 'monospace',
+                fontSize: '12px',
+                lineHeight: '1.5',
+                padding: '10px 12px',
+                outline: 'none',
+                marginBottom: '12px',
+              }}
+            />
+            {applyYamlValidationError && (
+              <p style={{ margin: '0 0 12px', color: '#f87171', fontSize: '12px', fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+                {applyYamlValidationError}
+              </p>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+              <button
+                onClick={() => applyYamlFileInputRef.current?.click()}
+                style={{ background: '#3a3a3a', border: '1px solid #555', borderRadius: '4px', color: '#d4d4d4', cursor: 'pointer', fontFamily: 'monospace', fontSize: '12px', padding: '6px 14px' }}
+              >
+                Load file
+              </button>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={handleApplyYamlDialogClose}
+                  style={{ background: '#3a3a3a', border: '1px solid #555', borderRadius: '4px', color: '#d4d4d4', cursor: 'pointer', fontFamily: 'monospace', fontSize: '12px', padding: '6px 16px' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleApplyYamlFromDialog}
+                  disabled={!applyYamlContent.trim()}
+                  style={{
+                    background: applyYamlContent.trim() ? '#1d4ed8' : '#3a3a3a',
+                    border: '1px solid #555',
+                    borderRadius: '4px',
+                    color: applyYamlContent.trim() ? '#fff' : '#666',
+                    cursor: applyYamlContent.trim() ? 'pointer' : 'default',
+                    fontFamily: 'monospace',
+                    fontSize: '12px',
+                    padding: '6px 16px',
+                  }}
+                >
+                  Apply
+                </button>
+              </div>
             </div>
           </div>
         </div>
